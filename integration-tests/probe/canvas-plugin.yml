@@ -1,0 +1,9 @@
+name: VoidClearCanvasProbe
+version: '1'
+main: net.voidclear.probe.CanvasProbe
+api-version: '1.21'
+folia-supported: true
+depend: [VoidClear]
+commands:
+  vccanvas:
+    permission: voidclear.admin

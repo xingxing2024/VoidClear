@@ -1,0 +1,17 @@
+/target/
+*.class
+*.jar
+*.log
+*.jfr
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+*.iml
+.DS_Store
+integration-tests/*.json
+integration-tests/*.jsonl

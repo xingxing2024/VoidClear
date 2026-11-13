@@ -1,0 +1,10 @@
+name: VoidClearProbe
+version: '1'
+main: net.voidclear.probe.Probe
+api-version: '1.21'
+depend: [VoidClear]
+softdepend: [PlaceholderAPI]
+folia-supported: true
+commands:
+  vcprobe:
+    permission: voidclear.admin

@@ -1,0 +1,36 @@
+# 插件注册信息，供服务器和构建工具使用，不是日常调参文件；一般无需修改。
+# 插件内部名称，同时决定默认数据目录 plugins/VoidClear/。
+name: VoidClear
+# 构建时自动替换为 Maven 项目版本，不要手动替换占位符。
+version: '${project.version}'
+# Java 启动类的完整名称，修改错误会导致插件无法加载。
+main: net.voidclear.VoidClearPlugin
+# 声明使用的 Bukkit API 版本，不代表所有 1.21 子版本都已实测。
+api-version: '1.21'
+# 声明插件支持 Folia 调度；这是加载声明，不代表已经完成 Folia 实服验证。
+folia-supported: true
+# 可选依赖：安装 PlaceholderAPI 时注册变量，不安装也能正常使用清扫功能。
+softdepend: [PlaceholderAPI]
+# Paper 启动时下载的数据库驱动，无需打包进本插件；首次启动需要能访问依赖仓库。
+libraries:
+  - org.xerial:sqlite-jdbc:3.51.0.0
+  - com.mysql:mysql-connector-j:9.6.0
+# 插件管理器显示的简介和作者信息。
+description: VoidClear 虚空清理，定时清扫实体，掉落物进入公共垃圾箱。
+authors: [VoidClear]
+commands:
+  # 主指令 /voidclear；别名 vc 表示也可以使用 /vc。
+  voidclear:
+    # 指令帮助中的简介；实际子命令提示文案见 messages.yml。
+    description: 虚空清理主指令
+    # 指令用法说明，不会自动创建其中列出的子命令。
+    usage: /vc <sweep|trash|check|keep|unkeep|status|diagnose|audit|history|trend|export|receipt|reload|help>
+    # 指令别名列表。
+    aliases: [vc]
+permissions:
+  # 管理权限节点：普通玩家领取垃圾箱物品不需要此权限，清空/清扫/重载等操作需要。
+  voidclear.admin:
+    # 权限说明，供管理员及权限插件查看。
+    description: 管理清扫、重载、诊断与存取审计
+    # 默认只给 OP；可通过权限插件将 voidclear.admin 授予其他管理员。
+    default: op
