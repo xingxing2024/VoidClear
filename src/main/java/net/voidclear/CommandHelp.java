@@ -25,7 +25,8 @@ final class CommandHelp {
                     new Entry("trend", "查看每日清扫趋势", "trend [1-365天]"),
                     new Entry("export", "导出清扫统计 CSV", "export [1-365天]"),
                     new Entry("diagnose", "只读诊断与报告导出", "diagnose [export]")),
-            List.of(new Entry("reload", "重载配置与提示文案", "reload"),
+            List.of(new Entry("admin", "游戏内管理面板", "admin"),
+                    new Entry("reload", "重载配置与提示文案", "reload"),
                     new Entry("trash clear", "永久清空回收箱 · 需确认", "trash clear confirm"),
                     new Entry("receipt", "清理失效收据 · 仅控制台", "receipt <玩家UUID> [confirm <预览确认码>]")));
 

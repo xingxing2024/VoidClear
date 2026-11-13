@@ -30,29 +30,40 @@ public class SweepPreview extends Sweeper {
         }
         return super.start(worlds, finished);
     }
-    @Override protected void sweep(Chunk chunk) {
-        if (!scheduler.running() || !chunk.isLoaded()) return;
-        long creatures=0, drops=0, experience=0;
-        var skipped=new LinkedHashMap<String,Long>();
-        var candidates=new java.util.ArrayList<Entity>();
-        for(Entity entity:chunk.getEntities()) {
-            String reason=skipReason(decide,policy,entity);
-            if(reason!=null) skipped.merge(reason,1L,Long::sum); else candidates.add(entity);
-        }
-        if(candidates.size()<pace.floor()) skipped.merge("低于区块阈值",(long)candidates.size(),Long::sum);
-        else for(Entity entity:candidates) {
-            if(entity instanceof Item) drops++;
-            else if(entity instanceof ExperienceOrb) experience++;
-            else creatures++;
-        }
-        Counts next=new Counts(creatures,drops,experience,skipped);
-        synchronized(results) {
-            results.merge(chunk.getWorld().getName(),next,(a,b)-> {
-                var reasons=new LinkedHashMap<>(a.skipped());
-                b.skipped().forEach((reason,count)->reasons.merge(reason,count,Long::sum));
-                return new Counts(a.creatures()+b.creatures(),a.drops()+b.drops(),a.experience()+b.experience(),reasons);
-            });
-        }
+    @Override protected ChunkWork work(Chunk chunk) {
+        Entity[] entities = chunk.isLoaded() ? chunk.getEntities() : new Entity[0];
+        return new ChunkWork() {
+            int offset; long creatures, drops, experience;
+            final Map<String,Long> skipped = new LinkedHashMap<>();
+            @Override public boolean step() {
+                if (!scheduler.running() || !chunk.isLoaded()) return true;
+                int end = Math.min(entities.length, offset + pace.sliceEntities());
+                for (; offset < end; offset++) {
+                    Entity entity = entities[offset];
+                    if (!readable(entity)) { skipped.merge("实体已离开所属区域",1L,Long::sum); continue; }
+                    String reason = skipReason(decide,policy,entity);
+                    if (reason != null) skipped.merge(reason,1L,Long::sum);
+                    else if (entity instanceof Item) drops++;
+                    else if (entity instanceof ExperienceOrb) experience++;
+                    else creatures++;
+                }
+                if (offset < entities.length) return false;
+                long candidates = creatures + drops + experience;
+                if (candidates < pace.floor()) {
+                    skipped.merge("低于区块阈值",candidates,Long::sum);
+                    creatures=0; drops=0; experience=0;
+                }
+                Counts next = new Counts(creatures,drops,experience,skipped);
+                synchronized(results) {
+                    results.merge(chunk.getWorld().getName(),next,(a,b)-> {
+                        var reasons=new LinkedHashMap<>(a.skipped());
+                        b.skipped().forEach((reason,count)->reasons.merge(reason,count,Long::sum));
+                        return new Counts(a.creatures()+b.creatures(),a.drops()+b.drops(),a.experience()+b.experience(),reasons);
+                    });
+                }
+                return true;
+            }
+        };
     }
     public Map<String,Counts> results() { synchronized(results) { return Map.copyOf(results); } }
 }

@@ -14,7 +14,7 @@ public final class SweepControlCheck {
   World world=(World)Proxy.newProxyInstance(SweepControlCheck.class.getClassLoader(),new Class[]{World.class},(p,m,a)->null);
   var chunks=new ArrayList<Chunk>();for(int i=0;i<5;i++){int x=i;chunks.add((Chunk)Proxy.newProxyInstance(SweepControlCheck.class.getClassLoader(),new Class[]{Chunk.class},(p,m,a)->switch(m.getName()){case "getWorld"->world;case "getX"->x;case "getZ"->0;default->throw new AssertionError(m.getName());}));}
   var sweeper=new Sweeper(s.pace(),s.policy(),scheduler,new Decide(s.policy())){
-   protected List<Chunk> collect(List<World> w){return chunks;}protected void sweep(Chunk c){ran[0]++;}};
+   protected List<Chunk> collect(List<World> w){return chunks;}protected ChunkWork work(Chunk c){ return () -> {ran[0]++; return true; }; }};
   assert !sweeper.pause();assert sweeper.start(List.of(world),()->done[0]++);
   assert sweeper.pause();assert !sweeper.pause();while(!next.isEmpty())next.remove().run();
   assert ran[0]==2 && done[0]==0 && sweeper.active();assert sweeper.progress().paused();

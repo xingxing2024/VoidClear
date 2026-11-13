@@ -82,6 +82,9 @@ public interface Scheduler {
      */
     boolean onChunk(org.bukkit.World world, int chunkX, int chunkZ, Runnable task);
 
+    /** Continue a chunk job on its owning region after at least one tick. */
+    boolean onChunkLater(org.bukkit.World world, int chunkX, int chunkZ, long ticks, Runnable task);
+
     /** 在实体所属区域执行；Paper 见 {@link #once}。 */
     void near(org.bukkit.entity.Entity entity, Runnable task);
 
@@ -195,6 +198,15 @@ public interface Scheduler {
                 return true;
             }
             return once(task);
+        }
+
+        @Override
+        public boolean onChunkLater(org.bukkit.World world, int x, int z, long ticks, Runnable task) {
+            if (stopped) return false;
+            Runnable current = () -> { if (!stopped) task.run(); };
+            if (folia) Bukkit.getRegionScheduler().runDelayed(plugin, world, x, z, ignored -> current.run(), Math.max(1, ticks));
+            else Bukkit.getScheduler().runTaskLater(plugin, current, Math.max(1, ticks));
+            return true;
         }
 
         @Override

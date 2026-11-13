@@ -69,6 +69,26 @@ final class ConfigMigration {
         return new Snapshot(users.get(0), users.get(1));
     }
 
+    static Snapshot edit(Path folder, Function<String,InputStream> resource, GuiSetting setting)
+            throws IOException, InvalidConfigurationException {
+        var configs = new ArrayList<YamlConfiguration>();
+        for (String name : List.of(Settings.CONFIG,Settings.MESSAGES)) {
+            var defaults = new YamlConfiguration();
+            try (var in = resource.apply(name)) {
+                if(in==null)throw new IOException("缺少内置配置 "+name);
+                defaults.loadFromString(new String(in.readAllBytes(),StandardCharsets.UTF_8));
+            }
+            var user = new YamlConfiguration();user.options().parseComments(true);
+            Path file=folder.resolve(name);
+            user.loadFromString(Files.exists(file)?Files.readString(file):defaults.saveToString());
+            user.setDefaults(defaults);configs.add(user);
+        }
+        setting.apply(configs.getFirst());
+        validateSchedule(configs.getFirst(),"timer");validateSchedule(configs.getFirst(),"trash.clear");
+        commit(Map.of(folder.resolve(Settings.CONFIG),configs.getFirst().saveToString().getBytes(StandardCharsets.UTF_8)));
+        return new Snapshot(configs.getFirst(),configs.getLast());
+    }
+
     private static boolean upgradeMessages(YamlConfiguration user, YamlConfiguration defaults) {
         boolean changed = false;
         for (var entry : java.util.Map.of("sweep.done", "&7本轮清扫结束 &8· &7已处理 &f%COUNT% &7个目标，确认回收 &f%COLLECTED% &7组掉落物 &8· &7%SECONDS%秒",

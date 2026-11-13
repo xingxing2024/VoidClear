@@ -24,7 +24,7 @@ commands:
     # 指令帮助中的简介；实际子命令提示文案见 messages.yml。
     description: 虚空清理主指令
     # 指令用法说明，不会自动创建其中列出的子命令。
-    usage: /vc <sweep|preview|trash|check|keep|unkeep|status|diagnose|audit|history|trend|export|receipt|reload|help>
+    usage: /vc <admin|sweep|preview|trash|check|keep|unkeep|status|diagnose|audit|history|trend|export|receipt|reload|help>
     # 指令别名列表。
     aliases: [vc]
 permissions:

@@ -21,7 +21,7 @@ import java.util.Locale;
  */
 public final class CommandHandler implements CommandExecutor, TabCompleter {
 
-    private static final List<String> SUBS = List.of("sweep", "preview", "trash", "check", "keep", "unkeep", "status", "diagnose", "audit", "history", "trend", "export", "receipt", "reload", "help");
+    private static final List<String> SUBS = List.of("admin", "sweep", "preview", "trash", "check", "keep", "unkeep", "status", "diagnose", "audit", "history", "trend", "export", "receipt", "reload", "help");
 
     /**
      * 已经带颜色的文本：转成组件再发，颜色码才不会原样显示。
@@ -52,7 +52,6 @@ public final class CommandHandler implements CommandExecutor, TabCompleter {
     }
 
     private final VoidClearPlugin plugin;
-    private net.voidclear.v2.runtime.SweepPreview preview;
 
     public CommandHandler(VoidClearPlugin plugin) {
         this.plugin = plugin;
@@ -110,6 +109,11 @@ public final class CommandHandler implements CommandExecutor, TabCompleter {
             return true;
         }
         switch (sub) {
+            case "admin" -> {
+                if(args.length!=1)raw(sender,"&7用法：/vc admin");
+                else if(sender instanceof Player player)plugin.adminMenu().open(player);
+                else raw(sender,plugin.message("general.players-only","&c只能在游戏内打开管理面板。"));
+            }
             case "sweep" -> sweep(sender, args);
             case "preview" -> preview(sender,args);
             case "check" -> check(sender, args);
@@ -159,15 +163,14 @@ public final class CommandHandler implements CommandExecutor, TabCompleter {
     private void preview(CommandSender sender,String[] args) {
         if(args.length>2) {raw(sender,"&7用法：/vc preview [世界]");return;}
         Scheduler.global(plugin,()-> {
-            if(preview!=null && preview.active()) {reply(sender,"&7已有清扫预览正在执行，请稍候。");return;}
+            var run=plugin.preview();
+            if(run.active()) {reply(sender,"&7已有清扫预览正在执行，请稍候。");return;}
             List<World> worlds;
             if(args.length==2) {
                 World world=Bukkit.getWorld(args[1]);
                 if(world==null) {reply(sender,"&c找不到世界："+args[1]);return;}
                 worlds=List.of(world);
             } else worlds=Bukkit.getWorlds();
-            var run=new net.voidclear.v2.runtime.SweepPreview(plugin.settings().pace(),plugin.settings().policy(),plugin.scheduler(),plugin.decide());
-            preview=run;
             reply(sender,plugin.message("preview.started","&7正在预览已加载区块，不会移除实体或写入库存…"));
             run.start(worlds,()-> {
                 reply(sender,plugin.message("preview.summary","&b清扫预览 &7（当前估计，正式执行时重新判定）"));

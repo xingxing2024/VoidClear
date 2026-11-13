@@ -32,6 +32,8 @@ $checks = @(
     @{ Name = 'DiagnosticsCheck'; Main = 'net.voidclear.v2.store.DiagnosticsCheck' },
     @{ Name = 'TrashAccessCheck'; Main = 'net.voidclear.v2.listener.TrashAccessCheck' },
     @{ Name = 'ImportantDropCheck'; Main = 'net.voidclear.v2.rule.ImportantDropCheck' },
+    @{ Name = 'SlicedSweepCheck'; Main = 'net.voidclear.v2.runtime.SlicedSweepCheck' },
+    @{ Name = 'GuiSettingsCheck'; Main = 'net.voidclear.v2.config.GuiSettingsCheck' },
     @{ Name = 'SweepBudgetCheck'; Main = 'net.voidclear.v2.runtime.SweepBudgetCheck' },
     @{ Name = 'SweepControlCheck'; Main = 'net.voidclear.v2.runtime.SweepControlCheck' },
     @{ Name = 'TrashFilterCheck'; Main = 'net.voidclear.v2.listener.TrashFilterCheck' },

@@ -17,7 +17,7 @@ public final class SweepPreviewCheck {
   });
   var next=new ArrayList<Runnable>();
   Scheduler scheduler=(Scheduler)Proxy.newProxyInstance(SweepPreviewCheck.class.getClassLoader(),new Class[]{Scheduler.class},(p,m,a)->switch(m.getName()){
-   case "running"->true;case "once"->{((Runnable)a[0]).run();yield true;}case "later"->{next.add((Runnable)a[1]);yield true;}
+   case "folia"->false;case "running"->true;case "once"->{((Runnable)a[0]).run();yield true;}case "later"->{next.add((Runnable)a[1]);yield true;}
    case "onChunk"->{((Runnable)a[3]).run();yield true;}default->throw new AssertionError(m.getName());
   });
   SweepPreview preview=new SweepPreview(settings.pace(),settings.policy(),scheduler,new Decide(settings.policy())){

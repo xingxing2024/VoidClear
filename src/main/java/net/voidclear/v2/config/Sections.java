@@ -72,6 +72,8 @@ public final class Sections {
             return Math.max(1, settings.rawInt("sweep.batch", 600));
         }
 
+        public int sliceEntities() { return Math.max(1,Math.min(4096,settings.rawInt("sweep.slice.entities",128))); }
+
         public boolean adaptive() { return settings.rawBool("sweep.adaptive.enable",true); }
         public int minBatch() { return Math.min(batch(),Math.max(1,settings.rawInt("sweep.adaptive.min-batch",16))); }
         public long targetNanos() {
