@@ -37,6 +37,10 @@ public final class CommandCheck {
         var handler = new CommandHandler(null);
         var admin = sender(true);
         var playerSender = sender(false);
+        assert handler.onTabComplete(playerSender,null,"vc",new String[]{"trash","s"}).equals(java.util.List.of("search"));
+        assert handler.onTabComplete(playerSender,null,"vc",new String[]{"trash","category",""}).containsAll(java.util.List.of("blocks","food","resources"));
+        assert handler.onTabComplete(playerSender,null,"vc",new String[]{"trash","cl"}).isEmpty();
+        assert handler.onTabComplete(admin,null,"vc",new String[]{"pr"}).equals(java.util.List.of("preview"));
         assert handler.onTabComplete(admin, null, "vc", new String[]{""}).containsAll(java.util.List.of("diagnose", "audit"));
         assert handler.onTabComplete(playerSender, null, "vc", new String[]{""}).equals(java.util.List.of("trash", "help"));
         assert handler.onTabComplete(playerSender, null, "vc", new String[]{"audit", ""}).isEmpty();

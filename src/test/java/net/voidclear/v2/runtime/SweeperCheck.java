@@ -60,7 +60,7 @@ public final class SweeperCheck {
             Runnable task = () -> {
                 ran.merge(chunk, 1, Integer::sum);
                 try {
-                    sweep(chunk);
+                    work(chunk).step();
                 } finally {
                     settle();
                 }
@@ -191,7 +191,7 @@ public final class SweeperCheck {
             @Override protected List<Chunk> collect(List<World> worlds) {
                 return List.of(chunk(0));
             }
-            @Override protected void sweep(Chunk chunk) {
+            @Override protected ChunkWork work(Chunk chunk) { return () -> {
                 entered.countDown();
                 try {
                     // 卡在本块结束之前：正是停用最危险的时刻
@@ -199,7 +199,7 @@ public final class SweeperCheck {
                 } catch (InterruptedException cut) {
                     Thread.currentThread().interrupt();
                 }
-            }
+             return true; }; }
         };
         int[] done = {0};
         sweeper.start(List.of(), () -> done[0]++);
@@ -255,10 +255,10 @@ public final class SweeperCheck {
                 @Override protected List<Chunk> collect(List<World> worlds) {
                     return List.of(chunk(0), chunk(1), chunk(2));
                 }
-                @Override protected void sweep(Chunk chunk) {
+                @Override protected ChunkWork work(Chunk chunk) { return () -> {
                     entered.countDown();
                     await(release, "release concurrent batch");
-                }
+                 return true; }; }
             };
             sweeper.start(List.of(), () -> { throw new AssertionError("batch is not final"); });
             Thread first = new Thread(tasks.get(0), "batch-first");
@@ -300,14 +300,14 @@ public final class SweeperCheck {
             @Override protected List<Chunk> collect(List<World> worlds) {
                 return List.of(chunk(0));
             }
-            @Override protected void sweep(Chunk chunk) {
+            @Override protected ChunkWork work(Chunk chunk) { return () -> {
                 entered.countDown();
                 try {
                     release.await();
                 } catch (InterruptedException cut) {
                     Thread.currentThread().interrupt();
                 }
-            }
+             return true; }; }
         };
         sweeper.start(List.of(), () -> { });
         Thread worker = new Thread(next.remove(0), "interrupt-worker");
@@ -361,9 +361,9 @@ public final class SweeperCheck {
             @Override protected List<Chunk> collect(List<World> worlds) {
                 return List.of(chunk(0), chunk(1));
             }
-            @Override protected void sweep(Chunk chunk) {
+            @Override protected ChunkWork work(Chunk chunk) { return () -> {
                 swept.merge(chunk, 1, Integer::sum);
-            }
+             return true; }; }
         };
         int[] done = {0};
         sweeper.start(List.of(), () -> done[0]++);
@@ -465,9 +465,9 @@ public final class SweeperCheck {
             @Override protected List<Chunk> collect(List<World> worlds) {
                 return chunks;
             }
-            @Override protected void sweep(Chunk chunk) {
+            @Override protected ChunkWork work(Chunk chunk) { return () -> {
                 swept.merge(chunk, 1, Integer::sum);
-            }
+             return true; }; }
         };
         int[] done = {0};
         sweeper.start(List.of(), () -> done[0]++);
@@ -588,10 +588,10 @@ public final class SweeperCheck {
             @Override protected List<Chunk> collect(List<World> worlds) {
                 return List.of(chunk(0), chunk(1), chunk(2), chunk(3), chunk(4));
             }
-            @Override protected void sweep(Chunk chunk) {
+            @Override protected ChunkWork work(Chunk chunk) { return () -> {
                 attempted[0]++;
                 if (attempted[0] == 1) throw new IllegalStateException("expected test failure");
-            }
+             return true; }; }
         };
         int[] done = {0};
         sweeper.start(List.of(), () -> done[0]++);
@@ -633,7 +633,7 @@ public final class SweeperCheck {
                     if (mode.equals("collect")) throw new IllegalStateException("injected collect failure");
                     return mode.equals("continuation") ? List.of(chunk(0), chunk(1), chunk(2)) : List.of(chunk(0));
                 }
-                @Override protected void sweep(Chunk chunk) { }
+                @Override protected ChunkWork work(Chunk chunk) { return () -> {  return true; }; }
             };
             assert sweeper.start(List.of(), () -> done[0]++);
             assert !sweeper.active() && done[0] == 1 : "Dispatch failure hung or completed twice: " + mode;

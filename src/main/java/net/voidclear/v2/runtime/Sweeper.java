@@ -58,6 +58,11 @@ public class Sweeper {
     private final Deque<Chunk> queue = new ArrayDeque<>();
     /** 本轮已经派到调度器里、还没回调的区块数：归零才考虑派下一批或收尾。 */
     private int issued;
+    private boolean paused, dispatchPending;
+    private int totalChunks, completedChunks;
+    private long batchWorkNanos;
+    private SweepBudget budget;
+    private final java.util.Set<ChunkTask> parked = new java.util.HashSet<>();
     /** 屏障后「正在执行」的区块数：还在交付掉落物，停用方要等它归零（见 {@link #stop}）。 */
     private int inFlight;
     /** 停用是永久的：此后 {@link #start} 一律拒绝。 */
@@ -119,6 +124,8 @@ public class Sweeper {
                 return false;
             }
             active = true;
+            paused=false;dispatchPending=false;totalChunks=0;completedChunks=0;
+            budget=new SweepBudget(pace.adaptive(),pace.batch(),pace.minBatch(),pace.targetNanos());
             // 上一轮（若因停用被撤下）留下的份额不能带进新一轮
             issued = 0;
             inFlight = 0;
@@ -175,6 +182,7 @@ public class Sweeper {
                 return;
             }
             queue.addAll(work);
+            totalChunks=work.size();
         }
         if (work.isEmpty()) {
             complete();
@@ -190,10 +198,12 @@ public class Sweeper {
     private void issue() {
         List<Chunk> batch = new ArrayList<>();
         synchronized (tally) {
-            if (!active) {
+            dispatchPending=false;
+            if (!active || paused || issued>0) {
                 return;
             }
-            while (batch.size() < pace.batch() && !queue.isEmpty()) {
+            batchWorkNanos=0;
+            while (batch.size() < budget.limit() && !queue.isEmpty()) {
                 batch.add(queue.poll());
             }
             issued = batch.size();
@@ -204,9 +214,10 @@ public class Sweeper {
         int refused = 0;
         for (Chunk chunk : batch) {
             try {
-                if (!schedule(chunk)) { failedTask(); refused++; }
+                if (!schedule(chunk)) { failedTask(); synchronized(tally){completedChunks++;} refused++; }
             } catch (RuntimeException rejected) {
                 logFailure(rejected);
+                synchronized(tally){completedChunks++;}
                 refused++;
             }
         }
@@ -221,79 +232,100 @@ public class Sweeper {
      * finally 恰好 {@code inFlight--}（交付完了）。停用只影响「要不要 sweep」，不影响「跑没跑完」。</p>
      */
     protected boolean schedule(Chunk chunk) {
-        return scheduler.onChunk(chunk.getWorld(), chunk.getX(), chunk.getZ(), () -> {
-            boolean live;
-            synchronized (tally) {
-                live = active;
-                if (live) {
-                    inFlight++;
-                }
-            }
-            try {
-                // 屏障之后的区块：不动实体，它也没有东西要交付
-                if (live) {
-                    sweep(chunk);
-                }
-            } catch (RuntimeException failed) {
-                logFailure(failed);
-            } finally {
-                end(live);
-            }
-        });
+        return scheduler.onChunk(chunk.getWorld(), chunk.getX(), chunk.getZ(), new ChunkTask(chunk));
     }
 
-    /** 一个已排上的区块走完了：在途只减自己记过的那一份，批次无论停用与否都要结掉。 */
-    private void end(boolean counted) {
-        synchronized (tally) {
-            if (counted) {
-                inFlight--;
+    @FunctionalInterface
+    protected interface ChunkWork { boolean step(); }
+
+    /** Every step, including the floor qualification pass, examines at most the configured slice size. */
+    protected ChunkWork work(Chunk chunk) {
+        Entity[] entities = chunk.isLoaded() ? chunk.getEntities() : new Entity[0];
+        return new ChunkWork() {
+            int offset, candidates;
+            boolean qualifying = pace.floor() > 0;
+            @Override public boolean step() {
+                if (!chunk.isLoaded() || !scheduler.running()) return true;
+                int end = Math.min(entities.length, offset + pace.sliceEntities());
+                if (qualifying) {
+                    for (; offset < end; offset++)
+                        if (readable(entities[offset]) && clearable(decide, policy, entities[offset])) candidates++;
+                    if (offset < entities.length) return false;
+                    if (candidates < pace.floor()) return true;
+                    qualifying = false; offset = 0;
+                    return entities.length == 0;
+                }
+                process(chunk, java.util.Arrays.asList(entities).subList(offset, end));
+                offset = end;
+                return offset >= entities.length;
             }
-            // 交付完了才叫醒等屏障的人；判断与 notify 都在锁里，不会漏
-            if (inFlight <= 0) {
-                tally.notifyAll();
+        };
+    }
+
+    protected boolean readable(Entity entity) {
+        return !scheduler.folia() || Bukkit.isOwnedByCurrentRegion(entity);
+    }
+
+    private final class ChunkTask implements Runnable {
+        final Chunk chunk;
+        ChunkWork work;
+        boolean retired;
+        ChunkTask(Chunk chunk) { this.chunk = chunk; }
+        @Override public void run() {
+            synchronized (tally) {
+                if (retired) return;
+                if (!active) { retired = true; work = null; return; }
+                if (paused && work != null) { parked.add(this); return; }
+                inFlight++;
             }
+            long began = System.nanoTime();
+            boolean finished = false;
+            try {
+                if (work == null) work = work(chunk);
+                finished = work.step();
+            } catch (RuntimeException failed) {
+                logFailure(failed); finished = true;
+            } finally {
+                synchronized (tally) {
+                    batchWorkNanos += Math.max(0, System.nanoTime() - began);
+                    inFlight--; tally.notifyAll();
+                }
+            }
+            if (finished) retire();
+            else continueLater();
         }
-        finishedOne(counted);
+        void continueLater() {
+            synchronized (tally) {
+                if (retired) return;
+                if (!active) { retired = true; work = null; return; }
+                if (paused) { parked.add(this); return; }
+            }
+            try {
+                if (!scheduler.onChunkLater(chunk.getWorld(), chunk.getX(), chunk.getZ(), 1L, this)) {
+                    failedTask(); retire();
+                }
+            } catch (RuntimeException rejected) { logFailure(rejected); retire(); }
+        }
+        void retire() {
+            boolean live;
+            synchronized (tally) {
+                if (retired) return;
+                retired = true; work = null; parked.remove(this);
+                live = active;
+                if (live) completedChunks++;
+            }
+            finishedOne(live);
+        }
     }
 
     /** 单个区块：生物移除，掉落物转入内存垃圾箱并排队保存。 */
-    protected void sweep(Chunk chunk) {
-        if (!scheduler.running()) {
-            failedTask();
-            return;
-        }
-        if (!chunk.isLoaded()) {
-            return;
-        }
-        Entity[] entities = chunk.getEntities();
-        if (entities.length == 0) {
-            return;
-        }
-        // 只看这个区块所在世界的设置：世界例外优先，其次全局默认
-        String name = chunk.getWorld().getName();
-        boolean drops = policy.drops(name);
-        boolean creatures = policy.creatures(name);
-        if (!drops && !creatures) {
-            return;
-        }
-        // floor：区块里待清的东西少于它就先不动，攒到下一轮一起清（省得每轮都为一块骨头扫全服）
-        int floor = pace.floor();
-        if (floor > 0) {
-            int candidates = 0;
-            for (Entity entity : entities) {
-                if (clearable(decide, policy, entity)) {
-                    candidates++;
-                }
-            }
-            if (candidates < floor) {
-                return;
-            }
-        }
+    protected void process(Chunk chunk, List<Entity> entities) {
+        if (!scheduler.running() || !chunk.isLoaded()) return;
         int hits = 0;
         List<TrashStore.SweepDeposit> deposits = new ArrayList<>();
         try {
             for (Entity entity : entities) {
-                if (!clearable(decide, policy, entity)) {
+                if (!readable(entity) || !clearable(decide, policy, entity)) {
                     continue;
                 }
                 if (entity instanceof Item item) {
@@ -403,23 +435,28 @@ public class Sweeper {
     }
 
     public static boolean clearable(Decide decide, Sections.Policy policy, Entity entity) {
-        if (!entity.isValid()) {
-            return false;
-        }
-        // 带 keep 标记的一律不动：掉落物、经验球也一样（别的插件可能给经验球打了标记）
-        if (Tags.has(entity)) {
-            return false;
-        }
+        return skipReason(decide, policy, entity) == null;
+    }
+
+    /** Shared read-only eligibility for preview and sweep; null means a current candidate. */
+    public static String skipReason(Decide decide, Sections.Policy policy, Entity entity) {
+        if (!entity.isValid()) return "实体已失效";
+        if (Tags.has(entity)) return "保护标记";
         String world = entity.getWorld().getName();
-        if (entity instanceof ExperienceOrb) {
-            return policy.experience(world);
-        }
+        if (entity instanceof ExperienceOrb) return policy.experience(world) ? null : "世界类别关闭";
         if (entity instanceof Item item) {
-            return policy.drops(world) && decide.sweeps(item);
+            if (!policy.drops(world)) return "世界类别关闭";
+            if ((long) item.getTicksLived() < policy.dropProtectSeconds() * 20L) return "新掉落保护";
+            if (item.getPersistentDataContainer().has(new org.bukkit.NamespacedKey("voidclear", "player_drop_operation")))
+                return "交易托管来源";
+            return decide.dropProtectionReason(item);
         }
-        if (entity instanceof org.bukkit.entity.Animals) return policy.animals(world) && decide.sweeps(entity);
-        if (Decide.isMonster(entity)) return policy.monsters(world) && decide.sweeps(entity);
-        return policy.creatures(world) && decide.sweeps(entity);
+        if (entity instanceof org.bukkit.entity.Animals && !policy.animals(world)
+                || Decide.isMonster(entity) && !policy.monsters(world) || !policy.creatures(world))
+            return "世界类别关闭";
+        if (entity instanceof org.bukkit.entity.Player) return "玩家";
+        if (entity instanceof org.bukkit.entity.Boss) return "Boss";
+        return decide.sweeps(entity) ? null : "实体保留规则";
     }
 
     /**
@@ -438,6 +475,7 @@ public class Sweeper {
             // 屏障之后：不派下一批、不收尾、不叫完成回调。停用方已认领落库
             finished = live && active && issued <= 0 && queue.isEmpty();
             nextBatch = live && active && !finished && issued <= 0;
+            if(live && active && issued<=0) budget.record(batchWorkNanos);
         }
         if (finished) {
             try {
@@ -447,18 +485,34 @@ public class Sweeper {
                 complete();
             }
         } else if (nextBatch) {
-            // 排不上（正在停用，或调度器限定了线程）：补一次同步派发，否则本轮永远卡在中间
-            try {
-                if (!scheduler.later(1L, this::issue) && !scheduler.once(this::issue)) {
-                    failedTask();
-                    complete();
-                }
-            } catch (RuntimeException failed) {
-                logFailure(failed);
-                complete();
-            }
+            requestNext();
         }
     }
+
+    private void requestNext() {
+        synchronized(tally) {
+            if(!active || paused || issued>0 || dispatchPending || queue.isEmpty()) return;
+            dispatchPending=true;
+        }
+        try {
+            if(!scheduler.later(1L,this::issue) && !scheduler.once(this::issue)) {failedTask();complete();}
+        } catch(RuntimeException failed) {logFailure(failed);complete();}
+    }
+
+    /** Already submitted chunk/database work completes; only subsequent batches pause. */
+    public boolean pause() { synchronized(tally) {if(!active || paused)return false;paused=true;return true;} }
+    public boolean resume() {
+        List<ChunkTask> pending;
+        synchronized(tally) {
+            if(!active || !paused)return false;
+            paused=false; pending=List.copyOf(parked); parked.clear();
+        }
+        pending.forEach(ChunkTask::continueLater);
+        requestNext();return true;
+    }
+    public record Progress(boolean active,boolean paused,int completedChunks,int totalChunks,int batch,int pendingTasks) { }
+    public Progress progress() { synchronized(tally) {return new Progress(active,paused,completedChunks,totalChunks,
+            budget==null?pace.batch():budget.limit(),Math.max(0,issued));} }
 
     /**
      * 一块的结算（自检替身自己造任务时用：它没有走 {@link #schedule} 的记账）。
@@ -483,6 +537,8 @@ public class Sweeper {
                 return;
             }
             stopped = true;
+            parked.forEach(task -> task.work = null); parked.clear();
+            paused=false;dispatchPending=false;
             active = false;
             done = null;
             queue.clear();
@@ -572,6 +628,7 @@ public class Sweeper {
                 return;
             }
             active = false;
+            paused=false;dispatchPending=false;
             lastTotal = removed;
             lastCollected = collected;
             lastCollectedItems = collectedItems;

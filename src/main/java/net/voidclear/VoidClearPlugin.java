@@ -39,6 +39,8 @@ public final class VoidClearPlugin extends JavaPlugin {
     private PlayerAuditLog audit;
     private Decide decide;
     private Sweeper sweeper;
+    private net.voidclear.v2.runtime.SweepPreview preview;
+    private net.voidclear.v2.listener.AdminMenu adminMenu;
     private TrashStore trash;
     private net.voidclear.v2.store.DatabaseTasks databaseTasks;
     private TrashListener trashListener;
@@ -105,6 +107,8 @@ public final class VoidClearPlugin extends JavaPlugin {
         playerTransfers = new PlayerTransfers(this);
         sweeper = new Sweeper(settings.pace(), settings.policy(), scheduler, decide, trash, sweepRecovery);
         trashListener = new TrashListener(this);
+        preview = new net.voidclear.v2.runtime.SweepPreview(settings.pace(),settings.policy(),scheduler,decide);
+        adminMenu = new net.voidclear.v2.listener.AdminMenu(this);
 
         sweepTimer = new Countdown(this, this::beginSweep);
         trashTimer = new Countdown(this, this::clearTrashAutomatically);
@@ -123,6 +127,7 @@ public final class VoidClearPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new CareListener(this), this);
         getServer().getPluginManager().registerEvents(playerTransfers, this);
         getServer().getPluginManager().registerEvents(trashListener, this);
+        getServer().getPluginManager().registerEvents(adminMenu, this);
         getServer().getPluginManager().registerEvents(sweepRecovery, this);
         for (var world : getServer().getWorlds()) for (var chunk : world.getLoadedChunks()) {
             scheduler.onChunk(world, chunk.getX(), chunk.getZ(), () -> {
@@ -154,6 +159,8 @@ public final class VoidClearPlugin extends JavaPlugin {
             cleanup("心跳", heartbeat::cancel);
             heartbeat = null;
         }
+        if (adminMenu != null) cleanup("管理面板", adminMenu::shutdown);
+        if (preview != null) cleanup("预览屏障", () -> preview.stopAndAwait(0L));
         if (trashListener != null) cleanup("菜单", trashListener::shutdown);
         if (playerTransfers != null) cleanup("玩家会话", playerTransfers::shutdown);
         if (sweeper != null) {
@@ -207,6 +214,7 @@ public final class VoidClearPlugin extends JavaPlugin {
             trashTimer.tick(message("trash.countdown.tick", "&7垃圾箱将在 &f%TIME% &7秒后清空。"));
             ensureSweepCountdown();
             trashListener.refreshOpenMenus();
+            adminMenu.refresh();
         } catch (RuntimeException failed) {
             getLogger().log(java.util.logging.Level.WARNING, "垃圾箱心跳刷新失败，下次心跳继续", failed);
         }
@@ -385,7 +393,9 @@ public final class VoidClearPlugin extends JavaPlugin {
     /* ------------------------------------------------------------------ */
 
     /** 改清扫相关配置后重载；立即生效，不用重启。 */
-    public void reload() {
+    public void reload() { updateConfiguration(settings::load); }
+
+    private void updateConfiguration(Runnable install) {
         int sweepPeriod = settings.pace().period();
         boolean sweepDaily = settings.pace().daily();
         List<String> sweepTimes = settings.pace().dailyTimes();
@@ -394,7 +404,7 @@ public final class VoidClearPlugin extends JavaPlugin {
         boolean clearDaily = settings.pace().trashClearDaily();
         List<String> clearTimes = settings.pace().trashClearTimes();
         Runnable reloadMenu = trashListener.prepareReload();
-        settings.load();
+        install.run();
         reloadMenu.run();
         applyLook();
         if (!settings.pace().trashClearEnabled()) trashTimer.stop();
@@ -410,6 +420,13 @@ public final class VoidClearPlugin extends JavaPlugin {
         }
         persistTimers();
     }
+
+    public void editSetting(net.voidclear.v2.config.GuiSetting setting) {
+        updateConfiguration(() -> settings.edit(setting));
+    }
+
+    public net.voidclear.v2.runtime.SweepPreview preview() { return preview; }
+    public net.voidclear.v2.listener.AdminMenu adminMenu() { return adminMenu; }
 
     private String databaseValue(String environment, String path, String fallback) {
         String value = System.getenv(environment);

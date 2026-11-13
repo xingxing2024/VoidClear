@@ -10,6 +10,34 @@ VoidClear 将定时清扫与公共垃圾箱结合起来：管理员设置清扫�
 
 ## 核心功能
 
+### 清扫前先预览
+
+管理员使用 `/vc preview [世界]`，按世界查看预计处理的生物、掉落实体和经验球，以及新掉落保护、保留规则和区块阈值等跳过原因。预览只读，实际执行时重新判定。
+
+### 新掉落物保护
+
+`drop.protect-seconds` 默认 60，刚产生的掉落物先保留一段时间，避免恰好赶上清扫。设为 0 可关闭。时间按实体已加载的 tick 计算，重启可能重新获得保护。
+
+### 垃圾箱分类与搜索
+
+菜单支持方块、资源、工具装备、食物、其他分类；也可使用 `/vc trash search <关键词>` 搜索材质 ID 或自定义名称，`/vc trash category <分类> [关键词]` 组合筛选。英文材质 ID 忽略大小写，自定义名称支持中文与空格。
+
+筛选页点击物品直接领取到背包，空间不足时只领取能装下的数量。筛选页仅领取，存入请使用 `/vc trash` 或“返回全部”按钮。已有自定义菜单不会被覆盖，命令入口可直接使用；新增按钮格式见默认菜单。
+
+### 清扫负载控制
+
+默认按本插件区块任务的实际耗时调整后续批量，起始 16 个区块、目标 5 毫秒，上限由 `sweep.batch` 控制。使用 `sweep.adaptive.enable: false` 可恢复固定批量。每个密集区块也按 `sweep.slice.entities` 分片，默认每片最多检查或处理 128 个实体，片间至少让出 1 tick；区块阈值预检查与只读预览同样分片。每片会重新核验实体有效性及 Folia 区域归属。目标耗时是调节批量的参考，实体快照获取、单次 API 和数据库操作无法中途抢占；Folia 使用各区域任务耗时之和，异步数据库等待不计入预算。
+
+管理员使用 `/vc sweep pause` 暂停后续批次与分片、`/vc sweep resume` 继续、`/vc sweep progress` 查看进度。已经提交的区块或数据库任务会正常结束，暂停状态不会跨重启保留。
+
+### 游戏内管理面板
+
+管理员使用 `/vc admin` 打开面板，查看进度、倒计时、公共库存和按世界汇总的预览结果；支持确认后开始清扫、暂停/继续、打开垃圾箱和重载配置。常用设置页可切换自适应批量、附魔/容器保护、新掉落保护时间、每片实体数及 ActionBar。配置保存前自动备份为 `config.yml.pre-voidclear.bak[.编号]`，仅成功落盘后生效。面板物品无法取走，每次操作重新检查管理权限，关闭后不会被后台回调重新打开。
+
+### 重要物品保护
+
+`drop.protection` 可保护附魔物品（含附魔书）、非空方块容器（含潜影盒）、收纳袋及含指定 ItemMeta PDC 键的物品。默认保护非空容器，附魔保护默认关闭；自定义键支持 `namespace:key` 或 `namespace:*`，需要按其他插件实际使用的标记配置。此保护只影响地面清扫，玩家仍可主动存入垃圾箱。世界的 `drop.protection` 小节整体覆盖全局保护设置。
+
 ### 按计划清扫
 
 支持按时间间隔或每天固定时刻执行。清扫前通过聊天倒计时、Boss 条、ActionBar 与音效提醒玩家，各种提示可以分别配置。倒计时会保存，重启后继续计时。
@@ -38,12 +66,12 @@ VoidClear 将定时清扫与公共垃圾箱结合起来：管理员设置清扫�
 
 | 项目 | 要求 |
 | --- | --- |
-| 服务端 | Paper / Folia 1.21.4+ |
+| 服务端 | Paper / Folia 1.21.4+，实服验证版本见发布说明 |
 | Java | 21+ |
 | 存储 | SQLite / MySQL |
 | 可选依赖 | PlaceholderAPI，用于向其他插件提供变量 |
 
-当前源码版本为 **3.0.0 测试候选版**，先在测试服验证配置与存取流程。
+当前正式版本为 **3.1.0**。
 
 ## 快速开始
 
@@ -56,12 +84,17 @@ VoidClear 将定时清扫与公共垃圾箱结合起来：管理员设置清扫�
 
 ## 常用指令
 
-主命令 `/voidclear`，别名 `/vc`。玩家使用公共垃圾箱无需管理员权限；管理操作需要 `voidclear.admin`，默认 OP 拥有。
+主命令 `/voidclear`，别名 `/vc`。玩家垃圾箱权限默认开放，可分别限制；管理操作需要 `voidclear.admin`，默认 OP 拥有。
 
 | 指令 | 用途 |
 | --- | --- |
+| `/vc admin` | 打开游戏内管理面板（管理员） |
 | `/vc trash` | 打开公共垃圾箱 |
+| `/vc preview [世界]` | 只读预览清扫目标与跳过原因 |
+| `/vc trash search <关键词>` | 搜索材质 ID 或自定义名称 |
+| `/vc trash category <分类> [关键词]` | 分类筛选，可附加搜索词 |
 | `/vc sweep` | 立即发起一轮清扫 |
+| `/vc sweep pause` / `resume` / `progress` | 暂停后续批次、继续、查看进度 |
 | `/vc check <实体> [世界]` | 查询清理规则与判定依据 |
 | `/vc keep` / `/vc unkeep` | 保护或取消保护目标实体 |
 | `/vc status` | 查看倒计时与上轮结果 |
@@ -69,6 +102,17 @@ VoidClear 将定时清扫与公共垃圾箱结合起来：管理员设置清扫�
 | `/vc audit` | 查询本服玩家存取记录 |
 | `/vc reload` | 重载普通配置 |
 | `/vc help [1-3]` | 查看完整帮助 |
+
+垃圾箱权限：
+
+| 权限 | 用途 | 默认 |
+| --- | --- | --- |
+| `voidclear.trash.open` | 打开菜单 | 开放 |
+| `voidclear.trash.deposit` | 存入 | 开放 |
+| `voidclear.trash.withdraw` | 领取 | 开放 |
+| `voidclear.trash.search` | 分类和搜索，还需 open | 开放 |
+
+例如“只允许捐赠”：保留 open、deposit，拒绝 withdraw。菜单点击、拖拽和筛选页均按实际进出物品校验；管理员不会绕过显式拒绝。权限变化影响之后的操作，已提交的交易按原凭据完成。
 
 完整参数、统计导出与维护操作见 [指令与权限](https://github.com/xingxing2024/VoidClear/wiki/%E6%8C%87%E4%BB%A4%E4%B8%8E%E6%9D%83%E9%99%90)。
 
@@ -93,7 +137,7 @@ VoidClear 将定时清扫与公共垃圾箱结合起来：管理员设置清扫�
 mvn package
 ```
 
-生成 `target/VoidClear-3.0.0.jar`。也可从成功的 [GitHub Actions 构建](https://github.com/xingxing2024/VoidClear/actions/workflows/build.yml)下载产物。
+生成 `target/VoidClear-3.1.0.jar`。也可从成功的 [GitHub Actions 构建](https://github.com/xingxing2024/VoidClear/actions/workflows/build.yml)下载产物。
 
 Windows PowerShell 离线自检：
 

@@ -21,7 +21,7 @@ import java.util.Locale;
  */
 public final class CommandHandler implements CommandExecutor, TabCompleter {
 
-    private static final List<String> SUBS = List.of("sweep", "trash", "check", "keep", "unkeep", "status", "diagnose", "audit", "history", "trend", "export", "receipt", "reload", "help");
+    private static final List<String> SUBS = List.of("admin", "sweep", "preview", "trash", "check", "keep", "unkeep", "status", "diagnose", "audit", "history", "trend", "export", "receipt", "reload", "help");
 
     /**
      * 已经带颜色的文本：转成组件再发，颜色码才不会原样显示。
@@ -83,9 +83,13 @@ public final class CommandHandler implements CommandExecutor, TabCompleter {
                 raw(sender, "&c此操作永久删除垃圾箱物品。确认执行：/vc trash clear confirm");
                 return true;
             }
-            if (args.length != 1) raw(sender, "&7用法：/vc trash");
-            else if (sender instanceof Player player) plugin.trashListener().open(player);
-            else raw(sender, plugin.message("general.players-only", "&c该指令只能在游戏内执行"));
+            try {
+                var filter=net.voidclear.v2.listener.TrashFilter.parse(args);
+                if(sender instanceof Player player) plugin.trashListener().open(player,filter);
+                else raw(sender,plugin.message("general.players-only","&c该指令只能在游戏内执行"));
+            } catch(IllegalArgumentException invalid) {
+                raw(sender,"&7用法：/vc trash [search <名称或材质> | category <分类> [关键词]]");
+            }
             return true;
         }
         if (sub.equals("help")) {
@@ -105,7 +109,13 @@ public final class CommandHandler implements CommandExecutor, TabCompleter {
             return true;
         }
         switch (sub) {
+            case "admin" -> {
+                if(args.length!=1)raw(sender,"&7用法：/vc admin");
+                else if(sender instanceof Player player)plugin.adminMenu().open(player);
+                else raw(sender,plugin.message("general.players-only","&c只能在游戏内打开管理面板。"));
+            }
             case "sweep" -> sweep(sender, args);
+            case "preview" -> preview(sender,args);
             case "check" -> check(sender, args);
             case "keep" -> keep(sender, args, true);
             case "unkeep" -> keep(sender, args, false);
@@ -129,12 +139,52 @@ public final class CommandHandler implements CommandExecutor, TabCompleter {
      * 有倒计时 / 清扫器这些全局状态，所以整体排到全局调度器再动。
      */
     private void sweep(CommandSender sender, String[] args) {
+        if(args.length>2 || args.length==2 && !List.of("pause","resume","progress").contains(args[1].toLowerCase(Locale.ROOT))) {
+            raw(sender,"&7用法：/vc sweep [pause|resume|progress]");return;
+        }
         Scheduler.global(plugin, () -> {
+            if(args.length==2) {
+                var sweeper=plugin.sweeper();
+                switch(args[1].toLowerCase(Locale.ROOT)) {
+                    case "pause" -> reply(sender,sweeper.pause()?"&e已暂停后续清扫批次，已提交任务会正常完成。":"&7当前没有可暂停的清扫。");
+                    case "resume" -> reply(sender,sweeper.resume()?"&a清扫已继续。":"&7当前没有已暂停的清扫。");
+                    case "progress" -> sweepProgress(sender);
+                }
+                return;
+            }
             String start = plugin.message("sweep.triggered", "&7清扫已开始。");
             Runnable done = () -> reply(sender, plugin.sweepSummary());
             if (!plugin.runSweep(start, done)) {
                 reply(sender, plugin.message("sweep.busy", "&7上一轮清扫尚未结束，请稍等"));
             }
+        });
+    }
+
+    private void preview(CommandSender sender,String[] args) {
+        if(args.length>2) {raw(sender,"&7用法：/vc preview [世界]");return;}
+        Scheduler.global(plugin,()-> {
+            var run=plugin.preview();
+            if(run.active()) {reply(sender,"&7已有清扫预览正在执行，请稍候。");return;}
+            List<World> worlds;
+            if(args.length==2) {
+                World world=Bukkit.getWorld(args[1]);
+                if(world==null) {reply(sender,"&c找不到世界："+args[1]);return;}
+                worlds=List.of(world);
+            } else worlds=Bukkit.getWorlds();
+            reply(sender,plugin.message("preview.started","&7正在预览已加载区块，不会移除实体或写入库存…"));
+            run.start(worlds,()-> {
+                reply(sender,plugin.message("preview.summary","&b清扫预览 &7（当前估计，正式执行时重新判定）"));
+                run.results().entrySet().stream().sorted(java.util.Map.Entry.comparingByKey()).forEach(row->{
+                    var count=row.getValue();
+                    reply(sender,"&f"+row.getKey()+" &8· &7生物 &f"+count.creatures()+" &7掉落实体 &f"+count.drops()+" &7经验球 &f"+count.experience());
+                    String skipped=count.skipped().entrySet().stream().filter(e->e.getValue()>0).sorted(java.util.Map.Entry.comparingByKey())
+                            .map(e->e.getKey()+"="+e.getValue()).collect(java.util.stream.Collectors.joining("，"));
+                    if(!skipped.isEmpty()) reply(sender,"&8跳过："+skipped);
+                });
+                if(run.results().isEmpty()) reply(sender,"&7没有可统计的已加载区块。");
+                if(run.lastFailures()>0) reply(sender,"&e预览未完整执行，失败任务："+run.lastFailures()+"，请检查日志。");
+                reply(sender,"&8预览不核验垃圾箱容量或待恢复来源，不承诺实际入箱件数。");
+            });
         });
     }
 
@@ -495,8 +545,15 @@ public final class CommandHandler implements CommandExecutor, TabCompleter {
         });
     }
 
+    private void sweepProgress(CommandSender sender) {
+        var p=plugin.sweeper().progress();
+        reply(sender,"&7清扫：&f"+(p.active()?(p.paused()?"已暂停":"进行中"):"空闲")+" &8· &7区块 &f"+p.completedChunks()+"/"+p.totalChunks()
+                +" &8· &7批量 &f"+p.batch()+" &8· &7待完成任务 &f"+p.pendingTasks());
+    }
+
     private void report(CommandSender sender) {
         reply(sender, plugin.hint("status.header", "&b虚空清理 &8· &7状态"));
+        if(plugin.sweeper().active())sweepProgress(sender);
         reply(sender, line("status.sweep", "下次清扫", plugin.sweepTimer().leftText()));
         reply(sender, plugin.sweeper().hasResult() ? plugin.sweepSummary()
                 : plugin.hint("status.no-result", "&7本次启动尚无清扫结果"));
@@ -559,9 +616,19 @@ public final class CommandHandler implements CommandExecutor, TabCompleter {
         if (args.length == 2 && args[0].equalsIgnoreCase("help"))
             return (admin ? List.of("1", "2", "3") : List.of("1")).stream()
                     .filter(page -> page.startsWith(args[1])).toList();
-        if (!admin) {
-            return List.of();
+        if(args[0].equalsIgnoreCase("trash")) {
+            List<String> values=List.of();
+            if(args.length==2) values=admin?List.of("search","category","clear"):List.of("search","category");
+            else if(args.length==3 && args[1].equalsIgnoreCase("category")) values=net.voidclear.v2.listener.TrashFilter.categories();
+            else if(args.length==3 && args[1].equalsIgnoreCase("clear") && admin) values=List.of("confirm");
+            String prefix=args[args.length-1].toLowerCase(Locale.ROOT);
+            return values.stream().filter(value->value.startsWith(prefix)).toList();
         }
+        if (!admin) { return List.of(); }
+        if(args[0].equalsIgnoreCase("sweep") && args.length==2)
+            return List.of("pause","resume","progress").stream().filter(v->v.startsWith(args[1].toLowerCase(Locale.ROOT))).toList();
+        if(args[0].equalsIgnoreCase("preview") && args.length==2)
+            return Bukkit.getWorlds().stream().map(World::getName).filter(name->name.startsWith(args[1])).toList();
         if (args[0].equalsIgnoreCase("receipt") && args.length == 3)
             return List.of("confirm").stream().filter(value -> value.startsWith(args[2].toLowerCase(Locale.ROOT))).toList();
         if (args[0].equalsIgnoreCase("diagnose") && args.length == 2)

@@ -82,6 +82,15 @@ public final class Settings {
         }
     }
 
+    /** Parse fresh files and commit a backup before publishing a GUI edit. */
+    public void edit(GuiSetting setting) {
+        if(plugin==null)throw new IllegalStateException("配置没有文件目录");
+        try { snapshot=ConfigMigration.edit(plugin.getDataFolder().toPath(),plugin::getResource,setting); }
+        catch(IOException | InvalidConfigurationException failed) {
+            throw new IllegalStateException("设置未保存，原配置已保留："+failed.getMessage(),failed);
+        }
+    }
+
     /* ------------------------------------------------------------------ */
 
     public String raw(String path, String fallback) {

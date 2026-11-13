@@ -39,6 +39,7 @@ sweep:
   claim: ' &8· &7本轮已入箱物品可用 &f/vc trash &7查看'
 
 trash:
+  no-permission: '&c你没有执行此垃圾箱操作的权限。'
   waiting: '&7正在确认上一笔操作，请稍候…'
   # 垃圾箱清空前的聊天提醒；%TIME% 为剩余秒数，时刻由 config.yml 的 trash.clear.marks 决定。
   countdown.tick: '&7垃圾箱将在 &f%TIME% &7秒后清空，请及时领取'
@@ -136,3 +137,8 @@ bar:
 actionbar:
   sweep:
     title: '&b清扫倒计时 &8· &f%TIME% &7秒'
+
+# 只读清扫预览，不修改实体或库存。
+preview:
+  started: '&7正在预览已加载区块，不会移除实体或写入库存…'
+  summary: '&b清扫预览 &7（当前估计，正式执行时重新判定）'
