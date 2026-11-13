@@ -157,18 +157,22 @@ public final class Decide {
         if (section == null || !section.getBoolean("enable", true)) {
             return false;
         }
-        List<String> keys = new ArrayList<>(section.getKeys(false));
-        keys.remove("enable");
-        keys.remove("protect-seconds");
-        if (keys.isEmpty()) {
-            return true; // 一条豁免都没写 = 全清
+        return dropProtectionReason(drop)==null;
+    }
+
+    public String dropProtectionReason(Item drop) {
+        ConfigurationSection section=policy.dropsOf(drop.getWorld().getName());
+        if(section==null||!section.getBoolean("enable",true)) return "掉落回收关闭";
+        var protection=section.getConfigurationSection("protection");
+        if(protection==null && policy.drops()!=null) protection=policy.drops().getConfigurationSection("protection");
+        ItemStack stack=drop.getItemStack();
+        String reason=ImportantDrops.reason(protection,stack);
+        if(reason!=null)return reason;
+        for(String key:section.getKeys(false)) {
+            if(List.of("enable","protect-seconds","protection").contains(key))continue;
+            if(exempt(section.getConfigurationSection(key),stack))return "物品豁免";
         }
-        for (String key : keys) {
-            if (exempt(section.getConfigurationSection(key), drop.getItemStack())) {
-                return false;
-            }
-        }
-        return true;
+        return null;
     }
 
     /** 写了的字段都要命中才算豁免。 */

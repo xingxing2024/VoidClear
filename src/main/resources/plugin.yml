@@ -28,9 +28,22 @@ commands:
     # 指令别名列表。
     aliases: [vc]
 permissions:
-  # 管理权限节点：普通玩家领取垃圾箱物品不需要此权限，清空/清扫/重载等操作需要。
+  # 管理权限节点：清空/清扫/重载等操作需要；玩家存取由下方四个默认开放的权限控制。
   voidclear.admin:
     # 权限说明，供管理员及权限插件查看。
     description: 管理清扫、重载、诊断与存取审计
     # 默认只给 OP；可通过权限插件将 voidclear.admin 授予其他管理员。
     default: op
+
+  voidclear.trash.open:
+    description: 打开公共垃圾箱
+    default: true
+  voidclear.trash.deposit:
+    description: 向公共垃圾箱存入物品
+    default: true
+  voidclear.trash.withdraw:
+    description: 从公共垃圾箱领取物品
+    default: true
+  voidclear.trash.search:
+    description: 使用分类与搜索（还需open权限）
+    default: true

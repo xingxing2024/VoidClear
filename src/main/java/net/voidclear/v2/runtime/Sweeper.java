@@ -58,6 +58,10 @@ public class Sweeper {
     private final Deque<Chunk> queue = new ArrayDeque<>();
     /** 本轮已经派到调度器里、还没回调的区块数：归零才考虑派下一批或收尾。 */
     private int issued;
+    private boolean paused, dispatchPending;
+    private int totalChunks, completedChunks;
+    private long batchWorkNanos;
+    private SweepBudget budget;
     /** 屏障后「正在执行」的区块数：还在交付掉落物，停用方要等它归零（见 {@link #stop}）。 */
     private int inFlight;
     /** 停用是永久的：此后 {@link #start} 一律拒绝。 */
@@ -119,6 +123,8 @@ public class Sweeper {
                 return false;
             }
             active = true;
+            paused=false;dispatchPending=false;totalChunks=0;completedChunks=0;
+            budget=new SweepBudget(pace.adaptive(),pace.batch(),pace.minBatch(),pace.targetNanos());
             // 上一轮（若因停用被撤下）留下的份额不能带进新一轮
             issued = 0;
             inFlight = 0;
@@ -175,6 +181,7 @@ public class Sweeper {
                 return;
             }
             queue.addAll(work);
+            totalChunks=work.size();
         }
         if (work.isEmpty()) {
             complete();
@@ -190,10 +197,12 @@ public class Sweeper {
     private void issue() {
         List<Chunk> batch = new ArrayList<>();
         synchronized (tally) {
-            if (!active) {
+            dispatchPending=false;
+            if (!active || paused || issued>0) {
                 return;
             }
-            while (batch.size() < pace.batch() && !queue.isEmpty()) {
+            batchWorkNanos=0;
+            while (batch.size() < budget.limit() && !queue.isEmpty()) {
                 batch.add(queue.poll());
             }
             issued = batch.size();
@@ -204,9 +213,10 @@ public class Sweeper {
         int refused = 0;
         for (Chunk chunk : batch) {
             try {
-                if (!schedule(chunk)) { failedTask(); refused++; }
+                if (!schedule(chunk)) { failedTask(); synchronized(tally){completedChunks++;} refused++; }
             } catch (RuntimeException rejected) {
                 logFailure(rejected);
+                synchronized(tally){completedChunks++;}
                 refused++;
             }
         }
@@ -229,6 +239,7 @@ public class Sweeper {
                     inFlight++;
                 }
             }
+            long began=System.nanoTime();
             try {
                 // 屏障之后的区块：不动实体，它也没有东西要交付
                 if (live) {
@@ -237,6 +248,7 @@ public class Sweeper {
             } catch (RuntimeException failed) {
                 logFailure(failed);
             } finally {
+                if(live) synchronized(tally) {completedChunks++;batchWorkNanos+=Math.max(0,System.nanoTime()-began);}
                 end(live);
             }
         });
@@ -417,7 +429,7 @@ public class Sweeper {
             if ((long) item.getTicksLived() < policy.dropProtectSeconds() * 20L) return "新掉落保护";
             if (item.getPersistentDataContainer().has(new org.bukkit.NamespacedKey("voidclear", "player_drop_operation")))
                 return "交易托管来源";
-            return decide.sweeps(item) ? null : "物品豁免";
+            return decide.dropProtectionReason(item);
         }
         if (entity instanceof org.bukkit.entity.Animals && !policy.animals(world)
                 || Decide.isMonster(entity) && !policy.monsters(world) || !policy.creatures(world))
@@ -443,6 +455,7 @@ public class Sweeper {
             // 屏障之后：不派下一批、不收尾、不叫完成回调。停用方已认领落库
             finished = live && active && issued <= 0 && queue.isEmpty();
             nextBatch = live && active && !finished && issued <= 0;
+            if(live && active && issued<=0) budget.record(batchWorkNanos);
         }
         if (finished) {
             try {
@@ -452,18 +465,29 @@ public class Sweeper {
                 complete();
             }
         } else if (nextBatch) {
-            // 排不上（正在停用，或调度器限定了线程）：补一次同步派发，否则本轮永远卡在中间
-            try {
-                if (!scheduler.later(1L, this::issue) && !scheduler.once(this::issue)) {
-                    failedTask();
-                    complete();
-                }
-            } catch (RuntimeException failed) {
-                logFailure(failed);
-                complete();
-            }
+            requestNext();
         }
     }
+
+    private void requestNext() {
+        synchronized(tally) {
+            if(!active || paused || issued>0 || dispatchPending || queue.isEmpty()) return;
+            dispatchPending=true;
+        }
+        try {
+            if(!scheduler.later(1L,this::issue) && !scheduler.once(this::issue)) {failedTask();complete();}
+        } catch(RuntimeException failed) {logFailure(failed);complete();}
+    }
+
+    /** Already submitted chunk/database work completes; only subsequent batches pause. */
+    public boolean pause() { synchronized(tally) {if(!active || paused)return false;paused=true;return true;} }
+    public boolean resume() {
+        synchronized(tally) {if(!active || !paused)return false;paused=false;}
+        requestNext();return true;
+    }
+    public record Progress(boolean active,boolean paused,int completedChunks,int totalChunks,int batch,int pendingTasks) { }
+    public Progress progress() { synchronized(tally) {return new Progress(active,paused,completedChunks,totalChunks,
+            budget==null?pace.batch():budget.limit(),Math.max(0,issued));} }
 
     /**
      * 一块的结算（自检替身自己造任务时用：它没有走 {@link #schedule} 的记账）。
@@ -488,6 +512,7 @@ public class Sweeper {
                 return;
             }
             stopped = true;
+            paused=false;dispatchPending=false;
             active = false;
             done = null;
             queue.clear();
@@ -577,6 +602,7 @@ public class Sweeper {
                 return;
             }
             active = false;
+            paused=false;dispatchPending=false;
             lastTotal = removed;
             lastCollected = collected;
             lastCollectedItems = collectedItems;

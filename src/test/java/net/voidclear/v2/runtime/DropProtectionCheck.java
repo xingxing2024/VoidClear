@@ -24,7 +24,7 @@ public final class DropProtectionCheck {
   World world=(World)Proxy.newProxyInstance(DropProtectionCheck.class.getClassLoader(),new Class[]{World.class},(p,m,a)->m.getName().equals("getName")?"world":null);
   PersistentDataContainer data=(PersistentDataContainer)Proxy.newProxyInstance(DropProtectionCheck.class.getClassLoader(),new Class[]{PersistentDataContainer.class},(p,m,a)->m.getName().equals("has")?false:null);
   return (Item)Proxy.newProxyInstance(DropProtectionCheck.class.getClassLoader(),new Class[]{Item.class},(p,m,a)->switch(m.getName()){
-   case "isValid"->true;case "getWorld"->world;case "getTicksLived"->ticks;case "getPersistentDataContainer"->data;
+   case "getItemStack"->null;case "isValid"->true;case "getWorld"->world;case "getTicksLived"->ticks;case "getPersistentDataContainer"->data;
    case "hashCode"->System.identityHashCode(p);case "equals"->p==a[0]; default->throw new AssertionError("Unexpected mutation/API: "+m.getName());
   });
  }

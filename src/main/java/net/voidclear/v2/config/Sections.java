@@ -72,6 +72,14 @@ public final class Sections {
             return Math.max(1, settings.rawInt("sweep.batch", 600));
         }
 
+        public boolean adaptive() { return settings.rawBool("sweep.adaptive.enable",true); }
+        public int minBatch() { return Math.min(batch(),Math.max(1,settings.rawInt("sweep.adaptive.min-batch",16))); }
+        public long targetNanos() {
+            double millis=settings.rawDouble("sweep.adaptive.target-ms",5);
+            if(!Double.isFinite(millis)) millis=5;
+            return (long)(Math.max(0.1,Math.min(1000,millis))*1_000_000);
+        }
+
         /** 区块里待清的东西少于这个数就整块跳过；0 = 关闭。 */
         public int floor() {
             return Math.max(0, settings.rawInt("sweep.floor", 0));

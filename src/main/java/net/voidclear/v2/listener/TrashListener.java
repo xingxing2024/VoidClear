@@ -43,6 +43,15 @@ public final class TrashListener implements Listener {
         config = TrashMenuConfig.load(file);
     }
 
+    private boolean access(Player player,boolean search) {
+        boolean allowed=search?TrashAccess.search(player):TrashAccess.open(player);
+        if(!allowed)denied(player);return allowed;
+    }
+    private void denied(Player player) {
+        player.sendActionBar(LegacyComponentSerializer.legacyAmpersand().deserialize(
+                plugin.settings().msg("trash.no-permission","&c你没有执行此垃圾箱操作的权限。")));
+    }
+
     private record SearchView(TrashFilter filter, long revision, List<TrashStore.Entry> matches) {
         List<TrashStore.Entry> page(int page, int size) {
             int start=(int)Math.min((long)page*size,matches.size());
@@ -54,6 +63,7 @@ public final class TrashListener implements Listener {
     private final Map<UUID,UUID> openings=new ConcurrentHashMap<>();
 
     public void open(Player player, TrashFilter filter) {
+        if(!access(player,filter!=null))return;
         if(filter==null) { open(player); return; }
         UUID request=UUID.randomUUID();
         requestedSearches.put(player.getUniqueId(),request);
@@ -61,6 +71,7 @@ public final class TrashListener implements Listener {
             int attempts;
             @Override public void run() {
                 if(!request.equals(requestedSearches.get(player.getUniqueId()))) return;
+                if(!access(player,true)){requestedSearches.remove(player.getUniqueId(),request);return;}
                 if(!player.isOnline() || !plugin.scheduler().running()) {requestedSearches.remove(player.getUniqueId(),request);return;}
                 if(plugin.playerTransfers().pending(player)) {
                     if(attempts++<100) {
@@ -79,7 +90,7 @@ public final class TrashListener implements Listener {
 
     /** At most100 payloads decoded per tick; a newer query, menu change or disconnect cancels this job. */
     private void beginSearch(Player player, TrashFilter filter, int requestedPage) {
-        if (!player.isOnline() || plugin.playerTransfers().pending(player)) return;
+        if (!player.isOnline() || !access(player,true) || plugin.playerTransfers().pending(player)) return;
         if(!empty(player.getItemOnCursor())) {
             player.sendMessage(LegacyComponentSerializer.legacyAmpersand().deserialize("&e请先放回光标上的物品，再使用分类或搜索。"));
             return;
@@ -123,7 +134,7 @@ public final class TrashListener implements Listener {
 
     public void open(Player player) {
         plugin.scheduler().player(player, () -> {
-            if (!player.isOnline()) return;
+            if (!player.isOnline() || !access(player,false)) return;
             searches.remove(player.getUniqueId());
             requestedSearches.remove(player.getUniqueId());
             openPage(player, 0);
@@ -164,13 +175,16 @@ public final class TrashListener implements Listener {
         if (!(event.getWhoClicked() instanceof Player player)) return;
         event.setCancelled(true);
         synchronized (menuLock()) {
-            if (menu.invalidated) return;
+            if (menu.invalidated || !access(player,menu.search!=null)) return;
             int raw = event.getRawSlot();
+            if(raw>=0 && raw<54 && event.getAction()==org.bukkit.event.inventory.InventoryAction.CLONE_STACK
+                    && !player.hasPermission("voidclear.trash.withdraw")){denied(player);return;}
             String action = raw >= 0 && raw < 54 ? actionAt(menu, raw) : "none";
             if (List.of("category","reset","search").contains(action)) {
                 plugin.scheduler().playerNextTick(player,()-> {
                     if(menu.invalidated || player.getOpenInventory().getTopInventory()!=menu.inventory
                             || plugin.playerTransfers().pending(player)) return;
+                    if(!access(player,!action.equals("reset")))return;
                     if(action.equals("reset")) open(player);
                     else if(action.equals("search")) player.sendMessage(
                             net.kyori.adventure.text.Component.text("点击这里输入搜索词：/vc trash search <名称或材质>")
@@ -222,6 +236,7 @@ public final class TrashListener implements Listener {
         if (event.getView().getTopInventory().getHolder() instanceof Menu menu
                 && event.getWhoClicked() instanceof Player player) {
             event.setCancelled(true);
+            if(!access(player,menu.search!=null))return;
             if (menu.search!=null || menu.invalidated || event.getRawSlots().stream().anyMatch(slot -> slot < 54
                     && !config.itemSlots().contains(slot))) {
                 return;
@@ -370,6 +385,10 @@ public final class TrashListener implements Listener {
                 topChanged = true;
                 break;
             }
+        }
+        if (!access(player,menu.search!=null) || !TrashAccess.permits(player.hasPermission("voidclear.trash.deposit"),
+                player.hasPermission("voidclear.trash.withdraw"),config.itemSlots().stream().map(slot->transfer.beforeTop[slot]).toList(),slots)) {
+            denied(player);return false;
         }
         if (!topChanged && !transfer.playerChanged()) return true;
         if (plugin.trash().mysql()) {
@@ -650,6 +669,7 @@ public final class TrashListener implements Listener {
     private void openPage(Player player,int page) { openPage(player,page,null); }
 
     private void openPage(Player player, int page, SearchView search) {
+        if(!access(player,search!=null))return;
         if (plugin.trash().mysql()) {
             if (plugin.playerTransfers().pending(player)) {
                 player.sendActionBar(LegacyComponentSerializer.legacyAmpersand().deserialize(
@@ -688,6 +708,7 @@ public final class TrashListener implements Listener {
     }
 
     private void showPage(Player player, int page, SearchView search) {
+        if(!access(player,search!=null))return;
         synchronized (menuLock()) {
             Menu menu = new Menu(config,page,search,titleValues(page,search));
             render(menu);

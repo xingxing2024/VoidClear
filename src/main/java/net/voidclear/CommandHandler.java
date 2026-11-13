@@ -135,7 +135,19 @@ public final class CommandHandler implements CommandExecutor, TabCompleter {
      * 有倒计时 / 清扫器这些全局状态，所以整体排到全局调度器再动。
      */
     private void sweep(CommandSender sender, String[] args) {
+        if(args.length>2 || args.length==2 && !List.of("pause","resume","progress").contains(args[1].toLowerCase(Locale.ROOT))) {
+            raw(sender,"&7用法：/vc sweep [pause|resume|progress]");return;
+        }
         Scheduler.global(plugin, () -> {
+            if(args.length==2) {
+                var sweeper=plugin.sweeper();
+                switch(args[1].toLowerCase(Locale.ROOT)) {
+                    case "pause" -> reply(sender,sweeper.pause()?"&e已暂停后续清扫批次，已提交任务会正常完成。":"&7当前没有可暂停的清扫。");
+                    case "resume" -> reply(sender,sweeper.resume()?"&a清扫已继续。":"&7当前没有已暂停的清扫。");
+                    case "progress" -> sweepProgress(sender);
+                }
+                return;
+            }
             String start = plugin.message("sweep.triggered", "&7清扫已开始。");
             Runnable done = () -> reply(sender, plugin.sweepSummary());
             if (!plugin.runSweep(start, done)) {
@@ -530,8 +542,15 @@ public final class CommandHandler implements CommandExecutor, TabCompleter {
         });
     }
 
+    private void sweepProgress(CommandSender sender) {
+        var p=plugin.sweeper().progress();
+        reply(sender,"&7清扫：&f"+(p.active()?(p.paused()?"已暂停":"进行中"):"空闲")+" &8· &7区块 &f"+p.completedChunks()+"/"+p.totalChunks()
+                +" &8· &7批量 &f"+p.batch()+" &8· &7待完成任务 &f"+p.pendingTasks());
+    }
+
     private void report(CommandSender sender) {
         reply(sender, plugin.hint("status.header", "&b虚空清理 &8· &7状态"));
+        if(plugin.sweeper().active())sweepProgress(sender);
         reply(sender, line("status.sweep", "下次清扫", plugin.sweepTimer().leftText()));
         reply(sender, plugin.sweeper().hasResult() ? plugin.sweepSummary()
                 : plugin.hint("status.no-result", "&7本次启动尚无清扫结果"));
@@ -603,6 +622,8 @@ public final class CommandHandler implements CommandExecutor, TabCompleter {
             return values.stream().filter(value->value.startsWith(prefix)).toList();
         }
         if (!admin) { return List.of(); }
+        if(args[0].equalsIgnoreCase("sweep") && args.length==2)
+            return List.of("pause","resume","progress").stream().filter(v->v.startsWith(args[1].toLowerCase(Locale.ROOT))).toList();
         if(args[0].equalsIgnoreCase("preview") && args.length==2)
             return Bukkit.getWorlds().stream().map(World::getName).filter(name->name.startsWith(args[1])).toList();
         if (args[0].equalsIgnoreCase("receipt") && args.length == 3)

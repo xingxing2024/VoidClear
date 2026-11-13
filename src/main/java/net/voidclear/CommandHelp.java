@@ -14,7 +14,7 @@ final class CommandHelp {
     private record Entry(String command, String description, String usage) { }
     private static final List<List<Entry>> PAGES = List.of(
             List.of(new Entry("trash", "公共回收箱 · 支持分类搜索", "trash [search <名称或材质>|category <分类> [关键词]]"),
-                    new Entry("sweep", "立即开始一轮清扫", "sweep"),
+                    new Entry("sweep", "清扫 · 暂停、继续与进度", "sweep [pause|resume|progress]"),
                     new Entry("status", "查看倒计时与上轮结果", "status"),
                     new Entry("check", "查看实体清扫规则", "check <实体> [世界]"),
                     new Entry("keep", "保护指定实体", "keep [名字|id|all]"),
