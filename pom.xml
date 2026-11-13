@@ -60,6 +60,10 @@
     </build>
 
     <repositories>
+        <repository>
+            <id>placeholderapi</id>
+            <url>https://repo.helpch.at/releases/</url>
+        </repository>
         <!-- 国内镜像优先；Maven Central 的构件走阿里云，Paper/Folia 的 API 只能走 https://repo.papermc.io -->
         <repository>
             <id>aliyun-public</id>
