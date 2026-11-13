@@ -4,6 +4,7 @@ import net.voidclear.VoidClearPlugin;
 import net.voidclear.v2.config.GuiSetting;
 import net.voidclear.v2.runtime.Scheduler;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
@@ -165,9 +166,10 @@ public final class AdminMenu implements Listener {
         icon(view,49,Material.BARRIER,"&7返回总览");
     }
     private static void icon(View view,int slot,Material material,String name,String... lore){
-        ItemStack item=new ItemStack(material);var meta=item.getItemMeta();meta.displayName(text(name));
-        meta.lore(Arrays.stream(lore).map(AdminMenu::text).toList());item.setItemMeta(meta);view.inventory.setItem(slot,item);
+        ItemStack item=new ItemStack(material);var meta=item.getItemMeta();meta.displayName(itemText(name));
+        meta.lore(Arrays.stream(lore).map(AdminMenu::itemText).toList());item.setItemMeta(meta);view.inventory.setItem(slot,item);
     }
+    private static Component itemText(String value){return text(value).decoration(TextDecoration.ITALIC,false);}
     private static Component text(String text){return LegacyComponentSerializer.legacyAmpersand().deserialize(text);}
     private static void message(Player player,String text){player.sendMessage(text(text));}
 }

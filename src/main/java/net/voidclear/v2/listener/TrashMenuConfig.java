@@ -6,6 +6,7 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import net.kyori.adventure.text.format.TextDecoration;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -58,12 +59,14 @@ final class TrashMenuConfig {
                 if (material == null) throw new IllegalStateException("未知菜单材质：" + key);
                 buttons.put(key.charAt(0), new Button(
                         yaml.getString(path + ".name", " "), material,
-                        yaml.getStringList(path + ".lore"), yaml.getString("Buttons." + key + ".action", "none"),
+                        yaml.getStringList(path + ".lore").stream().map(TrashMenuConfig::updatedDefaultLore).toList(), yaml.getString("Buttons." + key + ".action", "none"),
                         yaml.getBoolean(path + ".glow", false)));
             }
         }
+        String disabledLore = yaml.getString("Disabled-Icon.Lore", "&8（已到尽头）");
+        if ("&8&o（已到尽头）".equals(disabledLore)) disabledLore = "&8（已到尽头）";
         return new TrashMenuConfig(yaml.getString("Title", "&8虚空清理 &7· 垃圾箱"), layout, buttons,
-                yaml.getString("Disabled-Icon.Lore", "&8&o（已到尽头）"));
+                disabledLore);
     }
 
     int pageSize() { return itemSlots.size(); }
@@ -94,12 +97,22 @@ final class TrashMenuConfig {
         return stack;
     }
 
+    private static String updatedDefaultLore(String line) {
+        return switch (line) {
+            case "&7垃圾数量：&f%COUNT% &7件" -> "&7库存物品：&f%COUNT% &7件";
+            case "&7清空倒计时：&f%CLEAR_TIME%" -> "&7自动清空剩余：&f%CLEAR_TIME%";
+            case "&7下次清空：&f%CLEAR_AT%" -> "&7下次自动清空：&f%CLEAR_AT%";
+            default -> line;
+        };
+    }
+
     private static String apply(String value, Map<String, String> values) {
         for (var entry : values.entrySet()) value = value.replace(entry.getKey(), entry.getValue());
         return value;
     }
 
     private static net.kyori.adventure.text.Component text(String value) {
-        return LegacyComponentSerializer.legacyAmpersand().deserialize(value.replace('\u00a7', '&'));
+        return LegacyComponentSerializer.legacyAmpersand().deserialize(value.replace('\u00a7', '&'))
+                .decorationIfAbsent(TextDecoration.ITALIC, TextDecoration.State.FALSE);
     }
 }

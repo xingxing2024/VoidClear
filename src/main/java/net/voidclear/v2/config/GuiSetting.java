@@ -9,7 +9,7 @@ public enum GuiSetting {
     CONTAINERS("非空容器保护","drop.protection.nonempty-containers",true),
     DROP_AGE("新掉落保护秒数","drop.protect-seconds",60,0,30,60,120,300),
     SLICE("每片最多实体数","sweep.slice.entities",128,32,64,128,256),
-    ACTION_BAR("清扫 ActionBar","actionbar.sweep.enable",true);
+    ACTION_BAR("快捷栏上方倒计时","actionbar.sweep.enable",true);
 
     private final String label, path;
     private final boolean fallback;

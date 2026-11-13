@@ -1,22 +1,15 @@
-# 公共垃圾箱菜单：控制标题、格子布局、按钮外观与翻页动作。
-# 修改后执行 /vc reload；菜单有变化时会关闭旧页面，请重新打开，箱内物品不会清空。
-# 修改 Layout 会改变每页格数，建议先备份；错误配置会拒绝重载并保留旧菜单。
-# 筛选新增：%FILTER% 当前分类与关键词、%MATCHES% 匹配记录数。按钮支持 category / search / reset。
-# 可用变量：%PAGE% 当前页、%MAX_PAGE% 总页数、%COUNT% 全箱实际物品件数（64+16=80）。
-# %EMPTY_SLOT% 为当前页剩余物品格数，不是全箱容量，也不是还能放入的物品件数。
-# %CLEAR_TIME% 为距离清空剩余多久，%CLEAR_AT% 为下次清空日期时间（服务器时区）；关闭时显示“未开启”。
-# 颜色使用 & 代码，如 &7 灰色、&f 白色、&e 黄色、&l 加粗；保持键名大小写和引号。
-# 打开箱子时的窗口标题；页码从 1 开始。
+# 公共垃圾箱菜单，修改后执行 /vc reload。
+# %PAGE% 当前页，%MAX_PAGE% 总页数，%COUNT% 全箱物品件数。
+# %EMPTY_SLOT% 当前页空物品格，%FILTER% 当前筛选，%MATCHES% 匹配记录数。
+# %CLEAR_TIME% 自动清空剩余时间，%CLEAR_AT% 下次自动清空时刻；关闭时显示“未开启”。
+# 颜色使用 & 代码；按钮默认直立字，自定义 &o 可开启斜体。
+
 Title: '&b虚空清理 &7丨 &e公共垃圾箱 &7- &f%PAGE%&7/&f%MAX_PAGE%'
-# 无上一页/下一页时的按钮附加提示。
+# 翻页到边界时追加的提示；Material 为兼容字段，当前不读取。
 Disabled-Icon:
-  # 兼容旧菜单的保留字段，当前版本不读取；不能通过此项替换禁用按钮图标。
   Material: ''
-  # 到达第一页或最后一页时，追加到相应翻页按钮描述末尾的文字。
-  Lore: '&8&o（已到尽头）'
-# 必须是 6 行，每行恰好 9 个字符；引号里的空格不能删。
-# 空格为可存取物品格；p、n、i、# 对应下方 Buttons 的单字符键，定义为按钮后不可存取物品。
-# 当前前五行共 45 格放物品，最后一行放按钮；未在 Buttons 定义的字符也会成为物品格。
+  Lore: '&8（已到尽头）'
+# 固定 6 行 × 9 格。空格为物品位，其他字符对应 Buttons。
 Layout:
   - '         '
   - '         '
@@ -24,9 +17,8 @@ Layout:
   - '         '
   - '         '
   - 'pf#si#r#n'
-# 按钮定义：display 控制外观，action 控制点击行为；未填 action 默认为 none（纯装饰）。
-# 支持 previous / prev（上一页）、next（下一页）、first（首页）、last（末页）。
-# info 或其他未识别动作不执行翻页，仅重新打开当前页；none 不执行按钮动作。
+# display：外观。action：previous / next / first / last / category / search / reset / info / none。
+# info 刷新当前页；none 仅装饰。材质使用 Bukkit 名称。
 Buttons:
   'f':
     display:
@@ -50,55 +42,36 @@ Buttons:
       lore:
         - '&7清除分类与搜索，返回普通垃圾箱'
     action: reset
-  # 底栏的装饰玻璃，'#' 必须保留引号，否则 YAML 会把它视为注释。
   '#':
     display:
-      # 鼠标指向图标时显示的名字；一个空格用于隐藏名称。
       name: ' '
-      # 图标材质，使用有效的 Minecraft/Bukkit 材质名；错误材质会导致菜单加载失败。
       material: BLACK_STAINED_GLASS_PANE
-  # 布局中的 p：上一页按钮。
   'p':
     display:
-      # 按钮显示名；仅改变文字，不改变翻页行为。
       name: '&e&l← 上一页'
-      # 上一页图标，这里是箭头。
       material: ARROW
-      # 鼠标悬停时的多行描述；每个 - 是一行，可以使用上方列出的变量。
       lore:
         - '&7当前：&f第 %PAGE% 页 &7/ 共 &f%MAX_PAGE% &7页'
-    # 点击后翻到上一页；已经在第一页时不会再往前翻。
     action: previous
-  # 布局中的 n：下一页按钮。
   'n':
     display:
-      # 下一页按钮显示名。
       name: '&e&l下一页 →'
-      # 下一页图标。
       material: ARROW
-      # 下一页按钮的悬停描述。
       lore:
         - '&7当前：&f第 %PAGE% 页 &7/ 共 &f%MAX_PAGE% &7页'
-    # 点击后翻到下一页；没有下一页时仍停在当前页。
     action: next
-  # 布局中的 i：垃圾箱信息按钮，不能当作物品取走。
   'i':
     display:
-      # 信息按钮显示名。
       name: '&6&l公共垃圾箱'
-      # 信息按钮图标，这里是箱子。
       material: CHEST
-      # 是否显示附魔闪光；只影响图标外观，不给箱内物品附魔。
       glow: true
-      # 信息按钮的悬停说明；空字符串 '' 表示空白行。
       lore:
         - '&7当前页码：&f%PAGE% &7/ &f%MAX_PAGE%'
-        - '&7垃圾数量：&f%COUNT% &7件'
+        - '&7库存物品：&f%COUNT% &7件'
         - '&7剩余空位：&f%EMPTY_SLOT% &7格'
-        - '&7清空倒计时：&f%CLEAR_TIME%'
-        - '&7下次清空：&f%CLEAR_AT%'
+        - '&7自动清空剩余：&f%CLEAR_TIME%'
+        - '&7下次自动清空：&f%CLEAR_AT%'
         - ''
         - '&8清理掉的掉落物都会收进这里'
         - '&8需要的话直接拿走就好啦~'
-    # 信息按钮：点击后重新打开当前页，不清空垃圾箱、不发放额外物品。
     action: info

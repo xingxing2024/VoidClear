@@ -1,215 +1,178 @@
-# 虚空清理主配置：控制实体清扫、公共垃圾箱、保护功能和数据库。
-# 阅读方式：# 开头的是说明，不会执行；true = 开启，false = 关闭。
-# 缩进只能用空格，不能用 Tab；同一层不要重复写同名配置。
-# [] 表示空列表，{} 表示空配置节；不同配置的空列表含义见各项说明。
-# 通常修改后执行 /vc reload；数据库连接设置需要重启服务器。
-# 普通清扫是把地面掉落物收入垃圾箱；垃圾箱清空是永久删除箱内物品，两者互不共用定时器。
-# timer.yml 是自动保存的倒计时数据，不是配置文件，请勿在运行时手动编辑。
+# VoidClear 主配置
+# 修改后执行 /vc reload；数据库设置修改后需要重启。
+# 时间单位为秒，daily 时刻使用服务器时区；true 开启，false 关闭。
+# 提示文字见 messages.yml，垃圾箱菜单见 menus/bin.yml。
 
-# 垃圾箱数据库
-# sqlite：本机文件存储，不用自己安装数据库；mysql：连接已有的 MySQL 数据库。
-# MySQL 多服必须全部升级到事务修复版，不能混用旧版本；升级前协调停服并备份。
-# MySQL 同步事务可能等待数据库而卡顿，不适合高延迟或高频满箱操作；不保证断电时玩家与数据库同时保存。
-# MySQL 的 jdbc-url、username、password 也可分别用 VOIDCLEAR_DB_URL、
-# VOIDCLEAR_DB_USER、VOIDCLEAR_DB_PASSWORD 环境变量覆盖。
-# 这一节只在启动时读取，修改后需要重启；切换数据库不会自动搬运原数据库中的物品。
+# ── 1. 数据库 ──
+# 多子服使用同一 MySQL 数据库和表前缀，插件版本保持一致。
+# 切换数据库或表前缀不会自动搬运旧数据。
 database:
-  # 存储类型，只能填 sqlite 或 mysql；一般单服保持 sqlite 即可。
+  # sqlite：单服本地存储；mysql：多服共享。
   type: sqlite
-  # 仅 sqlite 使用：数据库文件名，相对于 plugins/VoidClear/；里面是物品数据，不要随意删除。
+  # SQLite 文件，相对于 plugins/VoidClear/。
   file: bin.db
-  # 仅 type: mysql 时使用下列连接参数。
   mysql:
-    # 连接地址：127.0.0.1 是主机，3306 是端口，voidclear 是数据库名（数据库需事先创建）。
-    # 示例关闭了 SSL；远程连接请按数据库证书配置 TLS，避免明文传输。
-    # serverTimezone 是 JDBC 的时区参数，不会改变 daily 清理使用的服务器时区。
+    # 先创建数据库；远程连接请配置对应的 SSL/TLS 参数。
     jdbc-url: 'jdbc:mysql://127.0.0.1:3306/voidclear?useSSL=false&serverTimezone=UTC&characterEncoding=utf8'
-    # MySQL 登录用户名；推荐通过 VOIDCLEAR_DB_USER 环境变量提供。
+    # 数据库账号与密码。
     username: ''
-    # MySQL 登录密码；推荐通过 VOIDCLEAR_DB_PASSWORD 环境变量提供，不要公开此文件。
     password: ''
-    # 插件数据表名称前缀，只能用英文字母、数字和下划线；修改后不会自动转移旧表数据。
+    # 只使用英文字母、数字和下划线。
     table-prefix: voidclear_
+# 可用环境变量覆盖连接信息：VOIDCLEAR_DB_URL、VOIDCLEAR_DB_USER、VOIDCLEAR_DB_PASSWORD。
 
-# 普通实体与地面掉落物清扫时间；不会清空垃圾箱已有物品。
+# ── 2. 地面清扫时间 ──
+# 回收地面掉落物、清理命中规则的实体；不会清空垃圾箱。
 timer:
-  # interval 模式下两轮清扫的间隔秒数。服务器启动后会开始第一轮倒计时。
-  period: 3600
-  # interval：按 period 循环；daily：每天在 times 指定的时刻开始。
+  # interval：按间隔；daily：每天固定时刻。
   mode: interval
-  # 仅 daily 模式使用：每天清扫的时刻，24 小时制 HH:mm，可填多个，按服务器时区执行。
-  # 下面表示每天凌晨 4 点、下午 4 点；时间要加引号，不是每隔 4 或 16 小时执行。
+  # interval 模式的间隔，3600 秒 = 1 小时；重启接续倒计时。
+  period: 3600
+  # daily 模式使用，24 小时制 HH:mm。
   times:
     - '04:00'
     - '16:00'
 
-# 普通清扫的工作量与聊天提醒。
+# ── 3. 清扫性能 ──
 sweep:
-  # 每批派发的区块数。数值越大，清扫越快，但调度负载也越高。
+  # 每批区块数上限；关闭自适应后使用固定批量。
   batch: 600
-  # 自适应只调整后续批量；按本插件区块任务总耗时估算，不是硬性每tick限时。单个密集区块仍可能超时。
   adaptive:
+    # 根据本插件任务耗时调整后续批量。
     enable: true
-    # 起始/最小批量，不超过上面的batch；关闭自适应时使用固定batch。
+    # 起始及最小批量，不超过 batch。
     min-batch: 16
-    # 目标工作耗时（毫秒），不含调度和异步数据库等待；Folia取区域任务耗时之和。
+    # 目标耗时，单位毫秒；是调节参考，不是每 tick 的硬限制。
+    # 不含异步数据库等待，Folia 使用区域任务耗时之和。
     target-ms: 5
-  # 单个密集区块的规则检查/实体处理分片，每片后至少让出1 tick；不会中途打断单次API或数据库操作。
   slice:
+    # 每片最多检查或处理的实体数，片间至少让出 1 tick。
     entities: 128
-  # 区块内待清理实体少于此数时跳过该区块；0 表示关闭此限制。
+  # 区块内待清理目标少于此数则跳过；0 不限制。
   floor: 0
-  # 开始清扫前还剩多少秒时发聊天提醒；下面表示提前 60、30、15、5 秒各提醒一次。
-  # 不是清扫周期；设为 [] 只关闭这些倒计时聊天提醒，不关闭清扫或音效。
+  # 提前多少秒发送聊天提醒；[] 关闭这些提醒。
   marks: [60, 30, 15, 5]
 
-# 普通清扫音效；与垃圾箱清空提醒独立。
+# ── 4. 清扫提醒 ──
 sound:
-  # 倒计时最后几秒每秒播放一次；0 表示关闭。
+  # 最后几秒每秒响一次；0 关闭。
   tail: 5
-  # 额外播放倒计时音效的剩余秒数，例如 [60, 30]；[] 表示不增加额外响铃时刻。
+  # 额外响铃时刻；[] 不增加。
   marks: []
-  # 倒计时音效 ID；设为 '' 关闭倒计时响铃，不影响完成音效。
+  # 倒计时与完成音效；空字符串关闭对应音效。
   key: 'block.note_block.pling'
-  # 清扫实际完成后播放的音效 ID；设为 '' 关闭完成音效，不影响倒计时响铃。
   finish-key: 'block.note_block.bell'
-  # 音量：0 表示静音，1.0 为默认音量；增大此值可能扩大可听范围。
+  # 音量，0 静音。
   volume: 1.0
-  # 音调：1.0 为正常，较小更低沉，较大更尖；建议在 0.5～2.0 之间。
+  # 音调，建议 0.5～2.0。
   pitch: 1.0
 
-# 普通清扫 Boss 条：显示在玩家屏幕顶部的进度条，不是垃圾箱清空倒计时。
+# 屏幕顶部的进度条。
 bar:
   sweep:
-    # 是否显示顶部 Boss 条；关闭不会停止清扫，也不会关闭聊天提醒或 ActionBar。
     enable: true
-    # 进度条颜色：PINK、BLUE、RED、GREEN、YELLOW、PURPLE、WHITE。
-    # 标题文字在 messages.yml 的 bar.sweep.title 中设置。
+    # PINK / BLUE / RED / GREEN / YELLOW / PURPLE / WHITE。
     color: BLUE
-    # 剩余多少秒时开始显示；0 表示全程显示。
+    # 剩余多少秒开始显示；0 全程显示。
     show-before: 60
 
-# 清扫 ActionBar：屏幕下方快捷栏上方的文字，开关与 Boss 条独立。
-# 显示时间沿用 bar.sweep.show-before，标题在 messages.yml 的 actionbar.sweep.title 中设置。
+# 快捷栏上方的清扫倒计时，与顶部进度条分别开关。
+# 显示时间沿用 bar.sweep.show-before。
 actionbar:
   sweep:
-    # true 显示下方倒计时文字；false 隐藏，不影响实际清扫。
     enable: true
 
-# 实体清理规则：保留名单优先于清理名单；两个名单都没命中时保留。
-  # 名单可写完整 ID（minecraft:zombie）、命名空间通配（minecraft:*）、animals、monster、'*'。
-  # monster 按 Enemy 分类匹配（排除 Animals），包含史莱姆、恶魂、幻翼、潜影贝等敌对实体。
-# ID 请带 minecraft: 前缀；'*' 表示全部匹配，单独写时必须加引号。
-# 玩家、Boss、通过 /vc keep 标记的实体始终保留；经验球由 world.experience-orbs 控制。
+# ── 5. 实体规则 ──
+# 保留优先，未命中清理名单也保留；玩家、Boss 和 /vc keep 标记始终保留。
+# 名单支持 minecraft:zombie、minecraft:*、animals、monster、'*'。
+# monster 为敌对实体分类（排除动物）；单独的 '*' 必须加引号。
 rule:
-  # 命名生物是否始终保留；false 时仍按下方名单判定。
+  # 命名生物始终保留；false 则继续按名单判断。
   named-kept: false
-  # true：精确 ID、命名空间和 animals / monster 分类只匹配原版实体；false 可匹配其他命名空间。
-  # 注意：名单中的 '*' 仍会匹配全部，不受此项限制，不要将它当作绝对的模组实体保护开关。
+  # 精确 ID、命名空间和分类只匹配原版实体；名单中的 '*' 不受此项限制。
   vanilla-only: true
-  # 始终保留的通用名单。优先级高于分类白名单与全局/世界规则。
+  # 通用、动物、怪物白名单：命中即保留。
   whitelist: []
-  # 动物白名单：只对动物类实体生效；[] 表示不额外豁免动物。
   animal-whitelist: []
-  # 怪物白名单：只对怪物类实体生效；[] 表示不额外豁免怪物。
   monster-whitelist: []
-  # 动物保留名单：[animals] 表示保留全部动物；要清理指定动物时先检查此项是否将它保留。
+  # 分类保留名单，优先于清理名单。
   animal-keep: [animals]
-  # 怪物保留名单：在这里列出的怪物不会被清理；[] 表示无额外保留。
   monster-keep: []
-  # 动物清理名单：只清理命中且未被任何保留规则保护的动物；[] 表示不额外指定。
+  # 分类清理名单，仍受世界开关和保留规则约束。
   animal-sweep: []
-  # 怪物清理名单：[monster] 表示清理怪物类实体，但保留规则和世界开关仍优先。
   monster-sweep: [monster]
-  # 全局保留名单；支持实体 ID、minecraft:*、animals、monster。
+  # 全局保留与清理名单。
   keep:
     - animals
-  # 全局清理名单；写法同 keep。
   sweep:
     - monster
-  # 按世界文件夹名称单独配置；{} 表示没有世界特例，全部沿用全局设置。
-  # 世界规则会分别覆盖全局 keep / sweep 名单；未设置的项继续使用全局规则。
-  # 世界 keep / sweep 不会取消通用白名单和分类保留名单；多个保留规则仍然优先。
-  # creatures / animals / monsters / experience-orbs 可分别关闭对应类别；drops 控制掉落物清理。
-  # 示例：
-  # world:
-  #   world_nether:
-  #     monsters: false
-  #     keep: [minecraft:pig, minecraft:cow]
-  #     sweep: [monster]
-  #     drop:
-  #       enable: true
+  # 世界名使用世界文件夹名称；未设置的项沿用全局。
+  # 世界 keep / sweep 分别覆盖全局名单，白名单和分类保留规则仍生效。
+  # 示例：world: {world_nether: {monsters: false}}
   world: {}
 
-# 垃圾箱内容定时清空，与上面的实体/地面掉落物清扫完全独立。
+# ── 6. 垃圾箱自动清空 ──
+# 默认关闭。开启后会永久删除箱内物品，与地面清扫分别计时。
 trash:
   clear:
-    # 开启后，到期永久删除垃圾箱内物品；升级不自动启用，确认周期后手动开启。
     enable: false
-    # interval：每隔 period 秒清空；daily：每天按 times 的时刻清空（服务器时区）。
+    # interval：按间隔；daily：每天固定时刻。
     mode: interval
-    # 仅 interval 使用，单位为秒：60 = 1 分钟，3600 = 1 小时，7200 = 2 小时。
-    # 重启接续原截止时间，关机时间也算在内；已过期会在开服后清空。修改周期后重载重新计时。
+    # interval 模式的间隔；7200 秒 = 2 小时。
+    # 重启接续倒计时，关机时已到期则在开服后清空。
     period: 7200
-    # 仅 daily 使用：每天清空的时刻，24 小时制 HH:mm，可填多个，按服务器时区执行。
-    # 下面表示每天凌晨 4 点和下午 4 点；daily 下不能为空或填非法时间（如 25:99）。
-    # 关机期间错过的时刻不补清，启动后等待下一时刻。
+    # daily 模式使用，关机错过的时刻不补清。
     times:
       - '04:00'
       - '16:00'
-    # 清空垃圾箱前的聊天提醒：剩余 30、10、5 秒时各提醒一次，让玩家及时领取。
-    # 不是每隔这些秒清一次！两种模式都适用；[] 关闭提前提醒，但仍会清空并发送清空结果。
-    # 提醒文字在 messages.yml 的 trash.countdown.tick 中修改，不影响普通清扫的 sweep.marks。
+    # 提前多少秒发送清空提醒；[] 关闭提醒。
     marks: [30, 10, 5]
 
-# 地面掉落物回收与豁免：只影响普通清扫，不会保护垃圾箱内的物品免遭定时清空。
+# ── 7. 掉落物回收与保护 ──
+# 仅影响地面清扫，玩家仍可主动将受保护物品存入垃圾箱。
 drop:
-  # 新掉落物至少存活多少秒（按20 tick/秒计算）；0关闭。仅计算实体已加载的时间，重启可能重新保护。
-  protect-seconds: 60
-  # 重要物品只豁免地面清扫，不限制玩家主动存入垃圾箱。
-  # rule.world.<世界>.drop.protection 可整体覆盖此小节。
-  protection:
-    # 附魔装备和附魔书；默认关闭，服主可按需求开启。
-    enchanted: false
-    # 保护装有物品的潜影盒等方块容器及收纳袋，空容器仍可回收。
-    nonempty-containers: true
-    # 保护含这些ItemMeta自定义标记的物品，支持精确键或命名空间:*；只检测键是否存在。
-    # 例：['myitems:weapon', 'quest:*']。不自动识别所有第三方物品。
-    pdc-keys: []
-  # 是否允许普通清扫回收地面物品；false 保留地面物品，true 时还需 world.drops 允许。
   enable: true
-  # 可自行添加多个具名豁免规则（如 important），任意一条命中就留在地上；不写则没有额外豁免。
-  # 每条可写 id、name、lore；同一条里写出的字段必须全部命中。
-  # id 要写完整物品 ID，例如 minecraft:diamond；name 匹配自定义名称，lore 匹配任意一行描述。
-  # name / lore 以 * 开头表示忽略大小写的“包含”，否则要求完全相同；不支持末尾通配符。
-  # 示例：保留名称包含「重要」的物品。
+  # 新掉落物保护时间；0 关闭。按已加载 tick 计时，重启可能重新保护。
+  protect-seconds: 60
+  # rule.world.<世界名>.drop.protection 可整体覆盖此小节。
+  protection:
+    # 附魔装备与附魔书保护。
+    enchanted: false
+    # 非空潜影盒等方块容器、收纳袋保护。
+    nonempty-containers: true
+    # ItemMeta 自定义标记，如 ['myitems:weapon', 'quest:*']。
+    pdc-keys: []
+  # 自定义豁免：同条规则的 id/name/lore 全部命中才保留，多条规则满足一条即可。
+  # id 为完整物品 ID；name/lore 以 * 开头表示包含匹配，否则完全匹配。
+  # 例：保留名称含“重要”的物品，取消下面两行注释即可。
   # important:
   #   name: '*重要'
 
-# 世界默认值（未在 rule.world 中单独配置时生效）
+# ── 8. 世界默认开关 ──
+# 生物仍需命中清理名单；单世界可在 rule.world 下覆盖。
 world:
-  # 生物与经验球清理总开关；false 时下方 animals、monsters、experience-orbs 即使开启也不清理。
+  # 生物与经验球总开关。
   creatures: true
-  # 是否允许清理动物；true 仅表示允许，具体还要匹配 rule 名单，并非直接清理所有动物。
+  # 动物清扫。
   animals: true
-  # 是否允许清理怪物；true 仍要按 rule 名单判定，false 则保留怪物。
+  # 怪物清扫。
   monsters: true
-  # 是否清理地面经验球；true 清理，false 保留（经验球不会存入垃圾箱）。
+  # 经验球会直接移除，不存入垃圾箱。
   experience-orbs: true
-  # 是否清扫掉落物；被清扫的物品会进入公共垃圾箱。
+  # 掉落物回收还需 drop.enable 开启。
   drops: true
 
-# 防踩踏保护；注意此处 true 表示开启保护，不是允许破坏。
+# ── 9. 防踩踏与爆炸保护 ──
+# true 表示保护农田和海龟蛋。
 trample:
-  # 是否阻止玩家踩坏农田和海龟蛋；false 不由本插件阻止。
+  # 玩家踩踏保护。
   players: true
-  # 是否阻止生物踩坏农田和海龟蛋；false 不由本插件阻止。
+  # 生物踩踏保护。
   mobs: true
-  # 生效世界列表；空列表表示所有世界。
+  # 空列表表示所有世界。
   worlds: []
 
+# 列出的爆炸实体不破坏方块，伤害仍保留；[] 关闭。
 blast:
-  # 列出的实体爆炸时不破坏方块，但不会取消爆炸或伤害；使用完整实体 ID。
-  # 默认只保护苦力怕爆炸；[] 表示关闭此项保护，不控制 TNT 等未列出的爆炸。
   blocked:
     - minecraft:creeper

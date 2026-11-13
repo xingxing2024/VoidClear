@@ -71,7 +71,7 @@ VoidClear 将定时清扫与公共垃圾箱结合起来：管理员设置清扫�
 | 存储 | SQLite / MySQL |
 | 可选依赖 | PlaceholderAPI，用于向其他插件提供变量 |
 
-当前正式版本为 **3.1.0**。
+当前正式版本为 **3.1.1**。
 
 ## 快速开始
 
@@ -137,7 +137,7 @@ VoidClear 将定时清扫与公共垃圾箱结合起来：管理员设置清扫�
 mvn package
 ```
 
-生成 `target/VoidClear-3.1.0.jar`。也可从成功的 [GitHub Actions 构建](https://github.com/xingxing2024/VoidClear/actions/workflows/build.yml)下载产物。
+生成 `target/VoidClear-3.1.1.jar`。也可从成功的 [GitHub Actions 构建](https://github.com/xingxing2024/VoidClear/actions/workflows/build.yml)下载产物。
 
 Windows PowerShell 离线自检：
 
