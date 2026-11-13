@@ -43,11 +43,107 @@ public final class TrashListener implements Listener {
         config = TrashMenuConfig.load(file);
     }
 
+    private record SearchView(TrashFilter filter, long revision, List<TrashStore.Entry> matches) {
+        List<TrashStore.Entry> page(int page, int size) {
+            int start=(int)Math.min((long)page*size,matches.size());
+            return List.copyOf(matches.subList(start,Math.min(start+size,matches.size())));
+        }
+    }
+    private final Map<UUID, UUID> searches=new ConcurrentHashMap<>();
+    private final Map<UUID,UUID> requestedSearches=new ConcurrentHashMap<>();
+    private final Map<UUID,UUID> openings=new ConcurrentHashMap<>();
+
+    public void open(Player player, TrashFilter filter) {
+        if(filter==null) { open(player); return; }
+        UUID request=UUID.randomUUID();
+        requestedSearches.put(player.getUniqueId(),request);
+        plugin.scheduler().player(player,new Runnable() {
+            int attempts;
+            @Override public void run() {
+                if(!request.equals(requestedSearches.get(player.getUniqueId()))) return;
+                if(!player.isOnline() || !plugin.scheduler().running()) {requestedSearches.remove(player.getUniqueId(),request);return;}
+                if(plugin.playerTransfers().pending(player)) {
+                    if(attempts++<100) {
+                        if(attempts==1) player.sendActionBar(LegacyComponentSerializer.legacyAmpersand().deserialize(
+                                plugin.settings().msg("trash.waiting","&7正在确认上一笔操作，请稍候…")));
+                        plugin.scheduler().playerNextTick(player,this);return;
+                    }
+                    requestedSearches.remove(player.getUniqueId(),request);
+                    player.sendMessage(LegacyComponentSerializer.legacyAmpersand().deserialize("&e上一笔操作仍在确认，请稍后重试搜索。"));return;
+                }
+                requestedSearches.remove(player.getUniqueId(),request);
+                beginSearch(player,filter,0);
+            }
+        });
+    }
+
+    /** At most100 payloads decoded per tick; a newer query, menu change or disconnect cancels this job. */
+    private void beginSearch(Player player, TrashFilter filter, int requestedPage) {
+        if (!player.isOnline() || plugin.playerTransfers().pending(player)) return;
+        if(!empty(player.getItemOnCursor())) {
+            player.sendMessage(LegacyComponentSerializer.legacyAmpersand().deserialize("&e请先放回光标上的物品，再使用分类或搜索。"));
+            return;
+        }
+        UUID request=UUID.randomUUID(); searches.put(player.getUniqueId(),request);
+        var snapshot=plugin.trash().snapshot();
+        Inventory original=player.getOpenInventory().getTopInventory();
+        TrashMenuConfig layout=config;
+        player.sendActionBar(LegacyComponentSerializer.legacyAmpersand().deserialize(
+                plugin.settings().msg("trash.searching","&7正在查找物品…")));
+        new Runnable() {
+            int offset;
+            final List<TrashStore.Entry> matches=new ArrayList<>();
+            @Override public void run() {
+                if(!request.equals(searches.get(player.getUniqueId()))) return;
+                if(!player.isOnline() || !plugin.scheduler().running() || config!=layout
+                        || player.getOpenInventory().getTopInventory()!=original) {
+                    searches.remove(player.getUniqueId(),request); return;
+                }
+                try {
+                    int until=Math.min(offset+100,snapshot.entries().size());
+                    for(;offset<until;offset++) {
+                        var entry=snapshot.entries().get(offset);
+                        if(filter.matches(TrashFilter.describe(ItemStack.deserializeBytes(entry.bytes())))) matches.add(entry);
+                    }
+                    if(offset<snapshot.entries().size()) {plugin.scheduler().playerNextTick(player,this);return;}
+                    searches.remove(player.getUniqueId(),request);
+                    if(plugin.playerTransfers().pending(player) || !empty(player.getItemOnCursor())) return;
+                    int page=Math.min(requestedPage,Math.max(0,(matches.size()-1)/layout.pageSize()));
+                    openPage(player,page,new SearchView(filter,snapshot.revision(),List.copyOf(matches)));
+                    player.sendMessage(LegacyComponentSerializer.legacyAmpersand().deserialize(
+                            "&7筛选：&f"+filter.label()+" &8· &f"+matches.size()+" &7条记录；点击领取到背包，存入请用 /vc trash。"));
+                } catch(RuntimeException failed) {
+                    searches.remove(player.getUniqueId(),request);
+                    plugin.getLogger().log(java.util.logging.Level.WARNING,"垃圾箱搜索失败，库存未修改",failed);
+                    player.sendMessage(LegacyComponentSerializer.legacyAmpersand().deserialize("&c搜索失败，请检查日志。"));
+                }
+            }
+        }.run();
+    }
+
     public void open(Player player) {
         plugin.scheduler().player(player, () -> {
             if (!player.isOnline()) return;
+            searches.remove(player.getUniqueId());
+            requestedSearches.remove(player.getUniqueId());
             openPage(player, 0);
         });
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void opened(org.bukkit.event.inventory.InventoryOpenEvent event) {
+        if (event.getInventory().getHolder() instanceof Menu) return;
+        UUID player = event.getPlayer().getUniqueId();
+        searches.remove(player);
+        requestedSearches.remove(player);
+        openings.remove(player);
+    }
+
+    @EventHandler
+    public void quit(org.bukkit.event.player.PlayerQuitEvent event) {
+        searches.remove(event.getPlayer().getUniqueId());
+        requestedSearches.remove(event.getPlayer().getUniqueId());
+        openings.remove(event.getPlayer().getUniqueId());
     }
 
     /** Parse before publishing any reload; unchanged menus keep viewers and sparse slots intact. */
@@ -71,25 +167,52 @@ public final class TrashListener implements Listener {
             if (menu.invalidated) return;
             int raw = event.getRawSlot();
             String action = raw >= 0 && raw < 54 ? actionAt(menu, raw) : "none";
+            if (List.of("category","reset","search").contains(action)) {
+                plugin.scheduler().playerNextTick(player,()-> {
+                    if(menu.invalidated || player.getOpenInventory().getTopInventory()!=menu.inventory
+                            || plugin.playerTransfers().pending(player)) return;
+                    if(action.equals("reset")) open(player);
+                    else if(action.equals("search")) player.sendMessage(
+                            net.kyori.adventure.text.Component.text("点击这里输入搜索词：/vc trash search <名称或材质>")
+                                    .clickEvent(net.kyori.adventure.text.event.ClickEvent.suggestCommand("/vc trash search ")));
+                    else {
+                        var categories=TrashFilter.Category.values();
+                        int current=menu.search==null?0:menu.search.filter().category().ordinal();
+                        beginSearch(player,new TrashFilter(categories[(current+1)%categories.length],
+                                menu.search==null?"":menu.search.filter().query()),0);
+                    }
+                });
+                return;
+            }
             if (!action.equals("none")) {
                 int page = switch (action) {
                     case "previous", "prev" -> Math.max(0, menu.page - 1);
                     case "next" -> hasNext(menu) ? menu.page + 1 : menu.page;
                     case "first" -> 0;
-                    case "last" -> lastPage();
+                    case "last" -> lastPage(menu);
                     default -> menu.page;
                 };
                 plugin.scheduler().playerNextTick(player, () -> {
                     if (!menu.invalidated && player.getOpenInventory().getTopInventory() == menu.inventory) {
-                        openPage(player, page);
+                        openPage(player, page, menu.search);
                     }
                 });
                 return;
             }
             if (raw >= 0 && raw < 54 && !config.itemSlots().contains(raw)) return;
-            if (!current(menu)) { render(menu); return; }
+            if (!current(menu)) { refresh(player,menu); return; }
             Transfer transfer = new Transfer(player, menu);
-            transfer.click(event);
+            if(menu.search!=null) {
+                // Search results are withdrawal-only. No cursor, swap, drag, drop or creative cloning.
+                if(raw<0 || raw>=54 || !empty(transfer.cursor)
+                        || !(event.getClick()==ClickType.LEFT || event.getClick()==ClickType.RIGHT
+                        || event.getClick()==ClickType.SHIFT_LEFT || event.getClick()==ClickType.SHIFT_RIGHT)) return;
+                ItemStack source=transfer.get(raw);
+                if(empty(source)) return;
+                List<Integer> destinations=new ArrayList<>();
+                for(int i=89;i>=54;i--) destinations.add(i);
+                transfer.insert(source,destinations);
+            } else transfer.click(event);
             commit(player, menu, transfer);
         }
     }
@@ -99,7 +222,7 @@ public final class TrashListener implements Listener {
         if (event.getView().getTopInventory().getHolder() instanceof Menu menu
                 && event.getWhoClicked() instanceof Player player) {
             event.setCancelled(true);
-            if (menu.invalidated || event.getRawSlots().stream().anyMatch(slot -> slot < 54
+            if (menu.search!=null || menu.invalidated || event.getRawSlots().stream().anyMatch(slot -> slot < 54
                     && !config.itemSlots().contains(slot))) {
                 return;
             }
@@ -122,6 +245,11 @@ public final class TrashListener implements Listener {
     public void close(InventoryCloseEvent event) {
         if (event.getInventory().getHolder() instanceof Menu menu) {
             viewers.remove(event.getPlayer().getUniqueId(), menu);
+            searches.remove(event.getPlayer().getUniqueId());
+            if(event.getReason()!=InventoryCloseEvent.Reason.OPEN_NEW) {
+                requestedSearches.remove(event.getPlayer().getUniqueId());
+                openings.remove(event.getPlayer().getUniqueId());
+            }
             if (event.getPlayer() instanceof Player player && !empty(player.getItemOnCursor())) {
                 if (plugin.trash().mysql() && event.getReason() == InventoryCloseEvent.Reason.DEATH) {
                     if (plugin.playerTransfers().pending(player)) quarantineDeathCursor(player, menu);
@@ -171,7 +299,9 @@ public final class TrashListener implements Listener {
     }
 
     private boolean current(Menu menu) {
-        return !menu.invalidated && plugin.trash().isCurrentPage(menu.page, config.pageSize(), menu.entries);
+        return !menu.invalidated && (menu.search==null
+                ? plugin.trash().isCurrentPage(menu.page,config.pageSize(),menu.entries)
+                : plugin.trash().isCurrentSelection(menu.entries));
     }
 
     private void quarantineDeathCursor(Player player, Menu menu) {
@@ -249,8 +379,11 @@ public final class TrashListener implements Listener {
         boolean accepted;
         try {
             transfer.operation = UUID.randomUUID();
-            if (topChanged) accepted = plugin.trash().replacePlayerPage(player.getUniqueId(), plugin.playerTransfers().transactionSession(player),
-                    transfer.operation, plugin.playerTransfers().previousOperation(player), transfer.evidence(), menu.page, config.pageSize(), menu.entries, slots);
+            if (topChanged) accepted = menu.search==null
+                    ? plugin.trash().replacePlayerPage(player.getUniqueId(), plugin.playerTransfers().transactionSession(player),
+                        transfer.operation,plugin.playerTransfers().previousOperation(player),transfer.evidence(),menu.page,config.pageSize(),menu.entries,slots)
+                    : plugin.trash().withdrawPlayerSelection(player.getUniqueId(),plugin.playerTransfers().transactionSession(player),
+                        transfer.operation,plugin.playerTransfers().previousOperation(player),transfer.evidence(),menu.entries,slots);
             else {
                 plugin.trash().preparePlayerOnly(player.getUniqueId(), plugin.playerTransfers().transactionSession(player), transfer.operation,
                         plugin.playerTransfers().previousOperation(player), transfer.evidence());
@@ -265,7 +398,7 @@ public final class TrashListener implements Listener {
             return false;
         }
         if (!accepted) {
-            render(menu);
+            refresh(player,menu);
             player.sendMessage(LegacyComponentSerializer.legacyAmpersand().deserialize("&c页面已变化或容量不足，本次操作未执行，请重试。"));
             return false;
         }
@@ -277,7 +410,8 @@ public final class TrashListener implements Listener {
         }
         if (transfer.drag) plugin.scheduler().playerNextTick(player, () -> acknowledge(player, menu, transfer));
         else if (!acknowledge(player, menu, transfer)) return false;
-        publishTransfer(player, menu, transfer, slots, plugin.trash().page(menu.page, config.pageSize()));
+        if(menu.search==null) publishTransfer(player, menu, transfer, slots, plugin.trash().page(menu.page, config.pageSize()));
+        else menu.invalidated=true;
         return true;
     }
 
@@ -298,8 +432,9 @@ public final class TrashListener implements Listener {
             if (slots == null) {
                 plugin.trash().preparePlayerOnly(id, session, transfer.operation, previous, evidence);
                 accepted = true;
-            } else accepted = plugin.trash().replacePlayerPage(id, session, transfer.operation, previous,
-                    evidence, menu.page, pageSize, displayed, slots);
+            } else accepted = menu.search==null
+                    ? plugin.trash().replacePlayerPage(id,session,transfer.operation,previous,evidence,menu.page,pageSize,displayed,slots)
+                    : plugin.trash().withdrawPlayerSelection(id,session,transfer.operation,previous,evidence,displayed,slots);
             if (accepted) plugin.playerTransfers().boundary("prepared");
             if (accepted) acceptedEntries.set(plugin.trash().page(menu.page, pageSize));
             return accepted;
@@ -309,7 +444,7 @@ public final class TrashListener implements Listener {
                 if (failed != null) { menu.invalidated = true; plugin.playerTransfers().isolate(player, failed); return; }
                 if (!accepted) {
                     plugin.playerTransfers().finished(player);
-                    if (!menu.invalidated && !closing) render(menu);
+                    if (!menu.invalidated && !closing) refresh(player,menu);
                     return;
                 }
                 if (!plugin.playerTransfers().live(player, session) || player.isDead()
@@ -326,6 +461,7 @@ public final class TrashListener implements Listener {
                 }
                 if (!acknowledge(player, menu, transfer)) return;
                 if (!closing && !menu.invalidated) {
+                    if(menu.search!=null) { menu.invalidated=true; return; }
                     if (plugin.trash().isCurrentPage(menu.page, pageSize, acceptedEntries.get()))
                         publishTransfer(player, menu, transfer, menu.config.itemSlots().stream().map(slot -> transfer.top[slot]).toList(), acceptedEntries.get());
                     else render(menu);
@@ -353,8 +489,8 @@ public final class TrashListener implements Listener {
                 synchronized (menuLock()) {
                     if (other.invalidated) return;
                     if (other.page == menu.page && plugin.trash().isCurrentPage(menu.page, config.pageSize(), displayed)) {
-                        render(other);
-                    } else if (!current(other)) render(other);
+                        refresh(viewer,other);
+                    } else if (!current(other)) refresh(viewer,other);
                 }
             });
         });
@@ -378,6 +514,10 @@ public final class TrashListener implements Listener {
             String actorName = player.getName();
             plugin.playerTransfers().save(player, transfer.operation, state, () -> {
                 plugin.recordAudit(actor, actorName, transfer.operation, changes);
+                if(menu.search!=null) plugin.scheduler().playerNextTick(player,()-> {
+                    if(player.isOnline() && player.getOpenInventory().getTopInventory()==menu.inventory)
+                        beginSearch(player,menu.search.filter(),menu.page);
+                });
                 if (plugin.trash().mysql() && !empty(transfer.cursor) && !player.isDead()
                         && player.getOpenInventory().getTopInventory() != menu.inventory) {
                     // Vanilla returned the actual cursor during close while its confirmation was in flight.
@@ -484,6 +624,9 @@ public final class TrashListener implements Listener {
     }
 
     public void invalidateOpenMenus() {
+        searches.clear();
+        requestedSearches.clear();
+        openings.clear();
         synchronized (menuLock()) {
             viewers.values().forEach(menu -> menu.invalidated = true);
             viewers.clear();
@@ -504,7 +647,9 @@ public final class TrashListener implements Listener {
         invalidateOpenMenus();
     }
 
-    private void openPage(Player player, int page) {
+    private void openPage(Player player,int page) { openPage(player,page,null); }
+
+    private void openPage(Player player, int page, SearchView search) {
         if (plugin.trash().mysql()) {
             if (plugin.playerTransfers().pending(player)) {
                 player.sendActionBar(LegacyComponentSerializer.legacyAmpersand().deserialize(
@@ -514,6 +659,8 @@ public final class TrashListener implements Listener {
             UUID session = plugin.playerTransfers().transactionSession(player);
             UUID previous = plugin.playerTransfers().previousOperation(player);
             var origin = player.getLocation();
+            Inventory previousInventory=player.getOpenInventory().getTopInventory();
+            UUID opening=UUID.randomUUID();openings.put(player.getUniqueId(),opening);
             plugin.playerTransfers().applying(player);
             plugin.databaseTasks().submit(() -> plugin.trash().sessionCheckpoint(player.getUniqueId(),
                     plugin.serverOwnership().id(), session, "玩家会话已变化")).whenComplete((checkpoint, failed) ->
@@ -527,24 +674,33 @@ public final class TrashListener implements Listener {
                             return;
                         }
                         plugin.playerTransfers().finished(player);
-                        showPage(player, page);
+                        if(!openings.remove(player.getUniqueId(),opening)
+                                || player.getOpenInventory().getTopInventory()!=previousInventory) return;
+                        showPage(player, page, search);
                     }));
             return;
         }
         synchronized (menuLock()) {
             try { plugin.playerTransfers().session(player); }
             catch (IllegalStateException failed) { plugin.playerTransfers().isolate(player, failed); return; }
-            showPage(player, page);
+            showPage(player, page, search);
         }
     }
 
-    private void showPage(Player player, int page) {
+    private void showPage(Player player, int page, SearchView search) {
         synchronized (menuLock()) {
-            Menu menu = new Menu(config, page, titleValues(page));
+            Menu menu = new Menu(config,page,search,titleValues(page,search));
             render(menu);
             player.openInventory(menu.inventory);
             viewers.put(player.getUniqueId(), menu);
         }
+    }
+
+    private void refresh(Player player,Menu menu) {
+        if(player.getOpenInventory().getTopInventory()!=menu.inventory || viewers.get(player.getUniqueId())!=menu) return;
+        if(menu.search==null) render(menu);
+        else if(!searches.containsKey(player.getUniqueId()) && !plugin.playerTransfers().pending(player))
+            beginSearch(player,menu.search.filter(),menu.page);
     }
 
     /** Called by the heartbeat, including after ground-drop collection or database refresh. */
@@ -554,8 +710,9 @@ public final class TrashListener implements Listener {
             if (player == null) return;
             plugin.scheduler().player(player, () -> {
                 synchronized (menuLock()) {
-                    if (!menu.invalidated) {
-                        if (!current(menu)) render(menu);
+                    if (!menu.invalidated && player.getOpenInventory().getTopInventory()==menu.inventory
+                            && viewers.get(id)==menu) {
+                        if (!current(menu) || menu.search!=null && menu.search.revision()!=plugin.trash().revision()) refresh(player,menu);
                         else renderButtons(menu);
                     }
                 }
@@ -737,18 +894,18 @@ public final class TrashListener implements Listener {
     }
 
     private boolean hasNext(Menu menu) {
-        return (menu.page + 1) * config.pageSize() < plugin.trash().size();
+        return (menu.page + 1) * config.pageSize() < (menu.search==null?plugin.trash().size():menu.search.matches().size());
     }
 
-    private int lastPage() {
-        return Math.max(0, (plugin.trash().size() - 1) / config.pageSize());
+    private int lastPage(Menu menu) {
+        return Math.max(0, ((menu.search==null?plugin.trash().size():menu.search.matches().size()) - 1) / config.pageSize());
     }
 
     private void render(Menu menu) {
         if (menu.invalidated) return;
         try {
-        List<TrashStore.Entry> entries = plugin.trash().page(menu.page, config.pageSize());
-        PageContents cached = pageContents.get(menu.page);
+        List<TrashStore.Entry> entries = menu.search==null?plugin.trash().page(menu.page, config.pageSize()):menu.search.page(menu.page,config.pageSize());
+        PageContents cached = menu.search==null?pageContents.get(menu.page):null;
         if (cached != null && !TrashStore.samePage(entries, cached.entries())) {
             pageContents.remove(menu.page);
             cached = null;
@@ -776,7 +933,7 @@ public final class TrashListener implements Listener {
     }
 
     private void renderButtons(Menu menu) {
-        Map<String, String> values = titleValues(menu.page);
+        Map<String, String> values = titleValues(menu.page,menu.search);
         if (values.equals(menu.buttonValues)) return;
         for (int row = 0; row < 6; row++) {
             for (int col = 0; col < 9; col++) {
@@ -791,9 +948,12 @@ public final class TrashListener implements Listener {
         menu.buttonValues = values;
     }
 
-    private Map<String, String> titleValues(int page) {
-        int max = Math.max(1, (plugin.trash().size() + config.pageSize() - 1) / config.pageSize());
+    private Map<String, String> titleValues(int page,SearchView search) {
+        int count=search==null?plugin.trash().size():search.matches().size();
+        int max = Math.max(1, (count + config.pageSize() - 1) / config.pageSize());
         Map<String, String> values = new HashMap<>();
+        values.put("%FILTER%",search==null?"全部":search.filter().label());
+        values.put("%MATCHES%",String.valueOf(count));
         values.put("%PAGE%", String.valueOf(Math.min(page + 1, max)));
         values.put("%MAX_PAGE%", String.valueOf(max));
         values.put("%COUNT%", String.valueOf(plugin.trash().itemCount()));
@@ -804,7 +964,7 @@ public final class TrashListener implements Listener {
                     .atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm:ss"))
                 : "未开启");
         values.put("%EMPTY_SLOT%", String.valueOf(config.pageSize()
-                - plugin.trash().page(Math.min(page, max - 1), config.pageSize()).size()));
+                - (search==null?plugin.trash().page(Math.min(page,max-1),config.pageSize()):search.page(Math.min(page,max-1),config.pageSize())).size()));
         return values;
     }
 
@@ -812,14 +972,16 @@ public final class TrashListener implements Listener {
         final TrashMenuConfig config;
         final Inventory inventory;
         final int page;
+        final SearchView search;
         List<TrashStore.Entry> entries = List.of();
         Map<String, String> buttonValues;
         volatile boolean invalidated;
-        Menu(TrashMenuConfig config, int page, Map<String, String> values) {
+        Menu(TrashMenuConfig config, int page, SearchView search, Map<String, String> values) {
             this.config = config;
             this.page = page;
+            this.search=search;
             inventory = Bukkit.createInventory(this, 54,
-                    LegacyComponentSerializer.legacyAmpersand().deserialize(config.title(values)));
+                    LegacyComponentSerializer.legacyAmpersand().deserialize(search==null?config.title(values):"&b筛选领取 &7· "+search.filter().category().label()+" &7"+(page+1)+"/"+values.get("%MAX_PAGE%")));
         }
         @Override public Inventory getInventory() { return inventory; }
     }

@@ -6,7 +6,7 @@
 
     <groupId>net.voidclear</groupId>
     <artifactId>voidclear</artifactId>
-    <version>3.0.0</version>
+    <version>3.1.0-SNAPSHOT</version>
     <packaging>jar</packaging>
     <name>VoidClear</name>
 

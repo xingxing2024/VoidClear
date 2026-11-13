@@ -227,7 +227,7 @@ public interface Scheduler {
                 return;
             }
             if (!folia) {
-                Bukkit.getScheduler().runTask(plugin, () -> { if (!stopped) task.run(); });
+                Bukkit.getScheduler().runTaskLater(plugin, () -> { if (!stopped) task.run(); }, 1L);
                 return;
             }
             if (player.isDead()) {

@@ -16,7 +16,7 @@ public final class CommandHelpCheck {
             List<ClickEvent> clicks = new ArrayList<>();
             for (Component line : lines) inspect(line, clicks);
             assert clicks.stream().filter(click -> click.action() == ClickEvent.Action.SUGGEST_COMMAND).count()
-                    == new int[]{6, 5, 3}[page - 1];
+                    == new int[]{6, 6, 3}[page - 1];
             assert lines.size() <= 12 : "Help reverted to a long flat list";
             for (ClickEvent click : clicks) {
                 if (click.action() == ClickEvent.Action.RUN_COMMAND) assert click.value().matches("/vc help [1-3]");

@@ -10,6 +10,20 @@ VoidClear 将定时清扫与公共垃圾箱结合起来：管理员设置清扫�
 
 ## 核心功能
 
+### 清扫前先预览
+
+管理员使用 `/vc preview [世界]`，按世界查看预计处理的生物、掉落实体和经验球，以及新掉落保护、保留规则和区块阈值等跳过原因。预览只读，实际执行时重新判定。
+
+### 新掉落物保护
+
+`drop.protect-seconds` 默认 60，刚产生的掉落物先保留一段时间，避免恰好赶上清扫。设为 0 可关闭。时间按实体已加载的 tick 计算，重启可能重新获得保护。
+
+### 垃圾箱分类与搜索
+
+菜单支持方块、资源、工具装备、食物、其他分类；也可使用 `/vc trash search <关键词>` 搜索材质 ID 或自定义名称，`/vc trash category <分类> [关键词]` 组合筛选。英文材质 ID 忽略大小写，自定义名称支持中文与空格。
+
+筛选页点击物品直接领取到背包，空间不足时只领取能装下的数量。筛选页仅领取，存入请使用 `/vc trash` 或“返回全部”按钮。已有自定义菜单不会被覆盖，命令入口可直接使用；新增按钮格式见默认菜单。
+
 ### 按计划清扫
 
 支持按时间间隔或每天固定时刻执行。清扫前通过聊天倒计时、Boss 条、ActionBar 与音效提醒玩家，各种提示可以分别配置。倒计时会保存，重启后继续计时。
@@ -43,7 +57,7 @@ VoidClear 将定时清扫与公共垃圾箱结合起来：管理员设置清扫�
 | 存储 | SQLite / MySQL |
 | 可选依赖 | PlaceholderAPI，用于向其他插件提供变量 |
 
-当前源码版本为 **3.0.0 测试候选版**，先在测试服验证配置与存取流程。
+当前源码版本为 **3.1.0-SNAPSHOT 开发候选版**，先在测试服验证配置与存取流程。
 
 ## 快速开始
 
@@ -61,6 +75,9 @@ VoidClear 将定时清扫与公共垃圾箱结合起来：管理员设置清扫�
 | 指令 | 用途 |
 | --- | --- |
 | `/vc trash` | 打开公共垃圾箱 |
+| `/vc preview [世界]` | 只读预览清扫目标与跳过原因 |
+| `/vc trash search <关键词>` | 搜索材质 ID 或自定义名称 |
+| `/vc trash category <分类> [关键词]` | 分类筛选，可附加搜索词 |
 | `/vc sweep` | 立即发起一轮清扫 |
 | `/vc check <实体> [世界]` | 查询清理规则与判定依据 |
 | `/vc keep` / `/vc unkeep` | 保护或取消保护目标实体 |
@@ -93,7 +110,7 @@ VoidClear 将定时清扫与公共垃圾箱结合起来：管理员设置清扫�
 mvn package
 ```
 
-生成 `target/VoidClear-3.0.0.jar`。也可从成功的 [GitHub Actions 构建](https://github.com/xingxing2024/VoidClear/actions/workflows/build.yml)下载产物。
+生成 `target/VoidClear-3.1.0-SNAPSHOT.jar`。也可从成功的 [GitHub Actions 构建](https://github.com/xingxing2024/VoidClear/actions/workflows/build.yml)下载产物。
 
 Windows PowerShell 离线自检：
 

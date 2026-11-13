@@ -136,3 +136,8 @@ bar:
 actionbar:
   sweep:
     title: '&b清扫倒计时 &8· &f%TIME% &7秒'
+
+# 只读清扫预览，不修改实体或库存。
+preview:
+  started: '&7正在预览已加载区块，不会移除实体或写入库存…'
+  summary: '&b清扫预览 &7（当前估计，正式执行时重新判定）'

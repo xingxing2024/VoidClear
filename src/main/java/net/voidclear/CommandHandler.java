@@ -21,7 +21,7 @@ import java.util.Locale;
  */
 public final class CommandHandler implements CommandExecutor, TabCompleter {
 
-    private static final List<String> SUBS = List.of("sweep", "trash", "check", "keep", "unkeep", "status", "diagnose", "audit", "history", "trend", "export", "receipt", "reload", "help");
+    private static final List<String> SUBS = List.of("sweep", "preview", "trash", "check", "keep", "unkeep", "status", "diagnose", "audit", "history", "trend", "export", "receipt", "reload", "help");
 
     /**
      * 已经带颜色的文本：转成组件再发，颜色码才不会原样显示。
@@ -52,6 +52,7 @@ public final class CommandHandler implements CommandExecutor, TabCompleter {
     }
 
     private final VoidClearPlugin plugin;
+    private net.voidclear.v2.runtime.SweepPreview preview;
 
     public CommandHandler(VoidClearPlugin plugin) {
         this.plugin = plugin;
@@ -83,9 +84,13 @@ public final class CommandHandler implements CommandExecutor, TabCompleter {
                 raw(sender, "&c此操作永久删除垃圾箱物品。确认执行：/vc trash clear confirm");
                 return true;
             }
-            if (args.length != 1) raw(sender, "&7用法：/vc trash");
-            else if (sender instanceof Player player) plugin.trashListener().open(player);
-            else raw(sender, plugin.message("general.players-only", "&c该指令只能在游戏内执行"));
+            try {
+                var filter=net.voidclear.v2.listener.TrashFilter.parse(args);
+                if(sender instanceof Player player) plugin.trashListener().open(player,filter);
+                else raw(sender,plugin.message("general.players-only","&c该指令只能在游戏内执行"));
+            } catch(IllegalArgumentException invalid) {
+                raw(sender,"&7用法：/vc trash [search <名称或材质> | category <分类> [关键词]]");
+            }
             return true;
         }
         if (sub.equals("help")) {
@@ -106,6 +111,7 @@ public final class CommandHandler implements CommandExecutor, TabCompleter {
         }
         switch (sub) {
             case "sweep" -> sweep(sender, args);
+            case "preview" -> preview(sender,args);
             case "check" -> check(sender, args);
             case "keep" -> keep(sender, args, true);
             case "unkeep" -> keep(sender, args, false);
@@ -135,6 +141,35 @@ public final class CommandHandler implements CommandExecutor, TabCompleter {
             if (!plugin.runSweep(start, done)) {
                 reply(sender, plugin.message("sweep.busy", "&7上一轮清扫尚未结束，请稍等"));
             }
+        });
+    }
+
+    private void preview(CommandSender sender,String[] args) {
+        if(args.length>2) {raw(sender,"&7用法：/vc preview [世界]");return;}
+        Scheduler.global(plugin,()-> {
+            if(preview!=null && preview.active()) {reply(sender,"&7已有清扫预览正在执行，请稍候。");return;}
+            List<World> worlds;
+            if(args.length==2) {
+                World world=Bukkit.getWorld(args[1]);
+                if(world==null) {reply(sender,"&c找不到世界："+args[1]);return;}
+                worlds=List.of(world);
+            } else worlds=Bukkit.getWorlds();
+            var run=new net.voidclear.v2.runtime.SweepPreview(plugin.settings().pace(),plugin.settings().policy(),plugin.scheduler(),plugin.decide());
+            preview=run;
+            reply(sender,plugin.message("preview.started","&7正在预览已加载区块，不会移除实体或写入库存…"));
+            run.start(worlds,()-> {
+                reply(sender,plugin.message("preview.summary","&b清扫预览 &7（当前估计，正式执行时重新判定）"));
+                run.results().entrySet().stream().sorted(java.util.Map.Entry.comparingByKey()).forEach(row->{
+                    var count=row.getValue();
+                    reply(sender,"&f"+row.getKey()+" &8· &7生物 &f"+count.creatures()+" &7掉落实体 &f"+count.drops()+" &7经验球 &f"+count.experience());
+                    String skipped=count.skipped().entrySet().stream().filter(e->e.getValue()>0).sorted(java.util.Map.Entry.comparingByKey())
+                            .map(e->e.getKey()+"="+e.getValue()).collect(java.util.stream.Collectors.joining("，"));
+                    if(!skipped.isEmpty()) reply(sender,"&8跳过："+skipped);
+                });
+                if(run.results().isEmpty()) reply(sender,"&7没有可统计的已加载区块。");
+                if(run.lastFailures()>0) reply(sender,"&e预览未完整执行，失败任务："+run.lastFailures()+"，请检查日志。");
+                reply(sender,"&8预览不核验垃圾箱容量或待恢复来源，不承诺实际入箱件数。");
+            });
         });
     }
 
@@ -559,9 +594,17 @@ public final class CommandHandler implements CommandExecutor, TabCompleter {
         if (args.length == 2 && args[0].equalsIgnoreCase("help"))
             return (admin ? List.of("1", "2", "3") : List.of("1")).stream()
                     .filter(page -> page.startsWith(args[1])).toList();
-        if (!admin) {
-            return List.of();
+        if(args[0].equalsIgnoreCase("trash")) {
+            List<String> values=List.of();
+            if(args.length==2) values=admin?List.of("search","category","clear"):List.of("search","category");
+            else if(args.length==3 && args[1].equalsIgnoreCase("category")) values=net.voidclear.v2.listener.TrashFilter.categories();
+            else if(args.length==3 && args[1].equalsIgnoreCase("clear") && admin) values=List.of("confirm");
+            String prefix=args[args.length-1].toLowerCase(Locale.ROOT);
+            return values.stream().filter(value->value.startsWith(prefix)).toList();
         }
+        if (!admin) { return List.of(); }
+        if(args[0].equalsIgnoreCase("preview") && args.length==2)
+            return Bukkit.getWorlds().stream().map(World::getName).filter(name->name.startsWith(args[1])).toList();
         if (args[0].equalsIgnoreCase("receipt") && args.length == 3)
             return List.of("confirm").stream().filter(value -> value.startsWith(args[2].toLowerCase(Locale.ROOT))).toList();
         if (args[0].equalsIgnoreCase("diagnose") && args.length == 2)

@@ -13,13 +13,14 @@ import java.util.List;
 final class CommandHelp {
     private record Entry(String command, String description, String usage) { }
     private static final List<List<Entry>> PAGES = List.of(
-            List.of(new Entry("trash", "打开公共回收箱", "trash"),
+            List.of(new Entry("trash", "公共回收箱 · 支持分类搜索", "trash [search <名称或材质>|category <分类> [关键词]]"),
                     new Entry("sweep", "立即开始一轮清扫", "sweep"),
                     new Entry("status", "查看倒计时与上轮结果", "status"),
                     new Entry("check", "查看实体清扫规则", "check <实体> [世界]"),
                     new Entry("keep", "保护指定实体", "keep [名字|id|all]"),
                     new Entry("unkeep", "取消实体保护", "unkeep [名字|id|all]")),
-            List.of(new Entry("audit", "查询本服物品存取", "audit [1-20] [type <DEPOSIT|WITHDRAW>|player <名字或UUID>]"),
+            List.of(new Entry("preview", "只读预览清扫目标与跳过原因", "preview [世界]"),
+                    new Entry("audit", "查询本服物品存取", "audit [1-20] [type <DEPOSIT|WITHDRAW>|player <名字或UUID>]"),
                     new Entry("history", "检索管理操作记录", "history [1-20] [type <操作>|player <玩家>]"),
                     new Entry("trend", "查看每日清扫趋势", "trend [1-365天]"),
                     new Entry("export", "导出清扫统计 CSV", "export [1-365天]"),

@@ -1,6 +1,7 @@
 # 公共垃圾箱菜单：控制标题、格子布局、按钮外观与翻页动作。
 # 修改后执行 /vc reload；菜单有变化时会关闭旧页面，请重新打开，箱内物品不会清空。
 # 修改 Layout 会改变每页格数，建议先备份；错误配置会拒绝重载并保留旧菜单。
+# 筛选新增：%FILTER% 当前分类与关键词、%MATCHES% 匹配记录数。按钮支持 category / search / reset。
 # 可用变量：%PAGE% 当前页、%MAX_PAGE% 总页数、%COUNT% 全箱实际物品件数（64+16=80）。
 # %EMPTY_SLOT% 为当前页剩余物品格数，不是全箱容量，也不是还能放入的物品件数。
 # %CLEAR_TIME% 为距离清空剩余多久，%CLEAR_AT% 为下次清空日期时间（服务器时区）；关闭时显示“未开启”。
@@ -22,11 +23,33 @@ Layout:
   - '         '
   - '         '
   - '         '
-  - 'p###i###n'
+  - 'pf#si#r#n'
 # 按钮定义：display 控制外观，action 控制点击行为；未填 action 默认为 none（纯装饰）。
 # 支持 previous / prev（上一页）、next（下一页）、first（首页）、last（末页）。
 # info 或其他未识别动作不执行翻页，仅重新打开当前页；none 不执行按钮动作。
 Buttons:
+  'f':
+    display:
+      name: '&b分类：%FILTER%'
+      material: HOPPER
+      lore:
+        - '&7点击切换分类；筛选页点击物品直接领取到背包'
+        - '&7匹配记录：%MATCHES%'
+    action: category
+  's':
+    display:
+      name: '&b搜索物品'
+      material: OAK_SIGN
+      lore:
+        - '&7点击获取搜索指令，可搜索材质ID或自定义名称'
+    action: search
+  'r':
+    display:
+      name: '&e返回全部 · 可存入'
+      material: CHEST
+      lore:
+        - '&7清除分类与搜索，返回普通垃圾箱'
+    action: reset
   # 底栏的装饰玻璃，'#' 必须保留引号，否则 YAML 会把它视为注释。
   '#':
     display:

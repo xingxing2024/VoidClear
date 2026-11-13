@@ -30,6 +30,8 @@ $checks = @(
     @{ Name = 'DatabaseTasksCheck'; Main = 'net.voidclear.v2.store.DatabaseTasksCheck' },
     @{ Name = 'PlayerAuditLogCheck'; Main = 'net.voidclear.v2.store.PlayerAuditLogCheck' },
     @{ Name = 'DiagnosticsCheck'; Main = 'net.voidclear.v2.store.DiagnosticsCheck' },
+    @{ Name = 'TrashFilterCheck'; Main = 'net.voidclear.v2.listener.TrashFilterCheck' },
+    @{ Name = 'FilteredWithdrawalCheck'; Main = 'net.voidclear.v2.store.FilteredWithdrawalCheck' },
     @{ Name = 'TransferSlotsCheck'; Main = 'net.voidclear.v2.listener.TransferSlotsCheck' },
     @{ Name = 'DeliveryFailureLogCheck'; Main = 'net.voidclear.v2.store.DeliveryFailureLogCheck' },
     @{ Name = 'PlayerSaveReceiptCheck'; Main = 'net.voidclear.v2.store.PlayerSaveReceiptCheck' },
@@ -49,6 +51,8 @@ $checks = @(
     @{ Name = 'MigrationCheck'; Main = 'net.voidclear.v2.config.MigrationCheck' },
     @{ Name = 'CountdownCheck'; Main = 'net.voidclear.v2.runtime.CountdownCheck' },
     @{ Name = 'SchedulerCheck'; Main = 'net.voidclear.v2.runtime.SchedulerCheck' },
+    @{ Name = 'SweepPreviewCheck'; Main = 'net.voidclear.v2.runtime.SweepPreviewCheck' },
+    @{ Name = 'DropProtectionCheck'; Main = 'net.voidclear.v2.runtime.DropProtectionCheck' },
     @{ Name = 'SweeperCheck'; Main = 'net.voidclear.v2.runtime.SweeperCheck' },
     @{ Name = 'SweepReportCheck'; Main = 'net.voidclear.v2.runtime.SweepReportCheck' },
     @{ Name = 'HistoryLogCheck'; Main = 'net.voidclear.v2.store.HistoryLogCheck' }

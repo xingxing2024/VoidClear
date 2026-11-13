@@ -143,6 +143,11 @@ public final class Sections {
             super(settings);
         }
 
+        /** Minimum loaded lifetime before a normal drop can be swept; zero disables it. */
+        public int dropProtectSeconds() {
+            return Math.max(0, settings.rawInt("drop.protect-seconds", 60));
+        }
+
         public boolean vanillaOnly() {
             return settings.rawBool("rule.vanilla-only", true);
         }

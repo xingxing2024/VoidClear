@@ -403,23 +403,28 @@ public class Sweeper {
     }
 
     public static boolean clearable(Decide decide, Sections.Policy policy, Entity entity) {
-        if (!entity.isValid()) {
-            return false;
-        }
-        // 带 keep 标记的一律不动：掉落物、经验球也一样（别的插件可能给经验球打了标记）
-        if (Tags.has(entity)) {
-            return false;
-        }
+        return skipReason(decide, policy, entity) == null;
+    }
+
+    /** Shared read-only eligibility for preview and sweep; null means a current candidate. */
+    public static String skipReason(Decide decide, Sections.Policy policy, Entity entity) {
+        if (!entity.isValid()) return "实体已失效";
+        if (Tags.has(entity)) return "保护标记";
         String world = entity.getWorld().getName();
-        if (entity instanceof ExperienceOrb) {
-            return policy.experience(world);
-        }
+        if (entity instanceof ExperienceOrb) return policy.experience(world) ? null : "世界类别关闭";
         if (entity instanceof Item item) {
-            return policy.drops(world) && decide.sweeps(item);
+            if (!policy.drops(world)) return "世界类别关闭";
+            if ((long) item.getTicksLived() < policy.dropProtectSeconds() * 20L) return "新掉落保护";
+            if (item.getPersistentDataContainer().has(new org.bukkit.NamespacedKey("voidclear", "player_drop_operation")))
+                return "交易托管来源";
+            return decide.sweeps(item) ? null : "物品豁免";
         }
-        if (entity instanceof org.bukkit.entity.Animals) return policy.animals(world) && decide.sweeps(entity);
-        if (Decide.isMonster(entity)) return policy.monsters(world) && decide.sweeps(entity);
-        return policy.creatures(world) && decide.sweeps(entity);
+        if (entity instanceof org.bukkit.entity.Animals && !policy.animals(world)
+                || Decide.isMonster(entity) && !policy.monsters(world) || !policy.creatures(world))
+            return "世界类别关闭";
+        if (entity instanceof org.bukkit.entity.Player) return "玩家";
+        if (entity instanceof org.bukkit.entity.Boss) return "Boss";
+        return decide.sweeps(entity) ? null : "实体保留规则";
     }
 
     /**

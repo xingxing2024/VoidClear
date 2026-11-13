@@ -159,6 +159,7 @@ public final class Decide {
         }
         List<String> keys = new ArrayList<>(section.getKeys(false));
         keys.remove("enable");
+        keys.remove("protect-seconds");
         if (keys.isEmpty()) {
             return true; // 一条豁免都没写 = 全清
         }

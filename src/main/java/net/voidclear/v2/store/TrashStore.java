@@ -84,15 +84,20 @@ public final class TrashStore implements AutoCloseable {
 
     private static final class Published {
         final List<Entry> entries;
+        final long revision;
+        final Map<Long,Entry> byId;
         volatile Long count;
-        Published(List<Entry> entries) { this.entries = entries; }
+        Published(List<Entry> entries, long revision) {
+            this.entries=entries; this.revision=revision;
+            this.byId=entries.stream().collect(java.util.stream.Collectors.toUnmodifiableMap(Entry::id,entry->entry));
+        }
     }
-    private volatile Published published = new Published(List.of());
+    private volatile Published published = new Published(List.of(), 0);
 
     /** Readers never wait on a JDBC writer, and never see its uncommitted working copy. */
     private void publish() {
         if (!mysql()) return;
-        published = new Published(items.entrySet().stream().map(row -> new Entry(row.getKey(), row.getValue())).toList());
+        published = new Published(items.entrySet().stream().map(row -> new Entry(row.getKey(), row.getValue())).toList(), databaseRevision);
     }
 
     private TrashStore(String jdbcUrl, String user, String password, String prefix, Logger logger) {
@@ -432,6 +437,32 @@ public final class TrashStore implements AutoCloseable {
         }
     }
 
+    public record Snapshot(long revision, List<Entry> entries) {
+        public Snapshot { entries = List.copyOf(entries); }
+    }
+    public long revision() { return mysql() ? published.revision : databaseRevision; }
+    public Snapshot snapshot() {
+        if (mysql() && !Thread.holdsLock(this)) { Published view=published; return new Snapshot(view.revision,view.entries); }
+        synchronized(this) { return new Snapshot(databaseRevision,page(0,CAPACITY)); }
+    }
+    public boolean isCurrentSelection(List<Entry> selected) {
+        if (closed) return false;
+        if(mysql() && !Thread.holdsLock(this)) {
+            Published view=published;
+            var seen=new java.util.HashSet<Long>();
+            for(Entry entry:selected) {
+                Entry current=view.byId.get(entry.id());
+                if(!seen.add(entry.id()) || current==null || !same(current.bytes,entry.bytes)) return false;
+            }
+            return true;
+        }
+        synchronized(this) {
+            var seen=new java.util.HashSet<Long>();
+            for(Entry entry:selected) if(!seen.add(entry.id()) || !same(items.get(entry.id()),entry.bytes)) return false;
+            return true;
+        }
+    }
+
     public List<Entry> page(int page, int pageSize) {
         if (page < 0 || pageSize < 1) throw new IllegalArgumentException("Invalid page");
         if (mysql() && !Thread.holdsLock(this)) return List.copyOf(publishedPage(page, pageSize));
@@ -677,15 +708,7 @@ public final class TrashStore implements AutoCloseable {
         if (closed || page < 0 || pageSize < 1 || displayed.size() > pageSize || slots.size() != pageSize) return false;
         List<Entry> current = page(page, pageSize);
         // IDs survive sweep merges and page shifts; legacy operations without a fence remain globally blocked.
-        try (var query = transactionConnection.prepareStatement("SELECT f.item_id FROM " + table
-                + "_players p LEFT JOIN " + table + "_item_fences f ON f.op_id=p.op_id"
-                + " WHERE p.state IN ('PREPARED','QUARANTINED')"); var rows = query.executeQuery()) {
-            var pageIds = current.stream().map(Entry::id).collect(java.util.stream.Collectors.toSet());
-            while (rows.next()) {
-                long id = rows.getLong(1);
-                if (rows.wasNull() || pageIds.contains(id)) return false;
-            }
-        } catch (SQLException failed) { throw new IllegalStateException("无法核对待确认物品，拒绝页面交易", failed); }
+        if (!selectionUnfenced(current)) return false;
         if (!samePage(current, displayed)) return false;
 
         List<Map.Entry<Long, byte[]>> all = new ArrayList<>(items.entrySet());
@@ -1106,6 +1129,57 @@ public final class TrashStore implements AutoCloseable {
             throw new SQLException("玩家交易状态损坏");
         return new PlayerCheckpoint(java.util.UUID.fromString(rows.getString(1)),
                 java.util.UUID.fromString(rows.getString(2)), state);
+    }
+
+    private boolean selectionUnfenced(List<Entry> selected) {
+        try (var query = transactionConnection.prepareStatement("SELECT f.item_id FROM " + table
+                + "_players p LEFT JOIN " + table + "_item_fences f ON f.op_id=p.op_id"
+                + " WHERE p.state IN ('PREPARED','QUARANTINED')"); var rows = query.executeQuery()) {
+            var pageIds = selected.stream().map(Entry::id).collect(java.util.stream.Collectors.toSet());
+            while (rows.next()) {
+                long id = rows.getLong(1);
+                if (rows.wasNull() || pageIds.contains(id)) return false;
+            }
+        } catch (SQLException failed) { throw new IllegalStateException("无法核对待确认物品，拒绝页面交易", failed); }
+        return true;
+    }
+
+    /** Withdraw-only filtered view: match stable IDs and exact bytes under the same database lock as receipts. */
+    public synchronized boolean withdrawPlayerSelection(java.util.UUID player, java.util.UUID session, java.util.UUID operation,
+            java.util.UUID expectedOperation, byte[] evidence, List<Entry> displayed, List<ItemStack> slots) {
+        return transaction(() -> {
+            if (displayed.isEmpty() || displayed.size()>54 || slots.size()<displayed.size() || slots.size()>54) return false;
+            for(int i=displayed.size();i<slots.size();i++) if(slots.get(i)!=null && !slots.get(i).isEmpty()) return false;
+            var seen=new java.util.HashSet<Long>();
+            var replacements=new java.util.HashMap<Long,byte[]>();
+            boolean changed=false;
+            for(int i=0;i<displayed.size();i++) {
+                Entry before=displayed.get(i);
+                if(!seen.add(before.id()) || !same(items.get(before.id()),before.bytes())) return false;
+                ItemStack after=slots.get(i);
+                if(after==null || after.isEmpty()) { replacements.put(before.id(),null); changed=true; continue; }
+                byte[] data=after.serializeAsBytes();
+                if(same(before.bytes(),data)) continue;
+                ItemStack original=decoded(before.id(),before.bytes());
+                if(!original.isSimilar(after) || after.getAmount()<1 || after.getAmount()>=original.getAmount()) return false;
+                replacements.put(before.id(),data); changed=true;
+            }
+            if(!changed || !selectionUnfenced(displayed)) return false;
+            var proposed=new LinkedHashMap<Long,byte[]>();
+            var newIds=new ArrayList<Long>();
+            for(var row:items.entrySet()) {
+                if(!replacements.containsKey(row.getKey())) proposed.put(row.getKey(),row.getValue());
+                else if(replacements.get(row.getKey())!=null) {
+                    long id=newId(); newIds.add(id); proposed.put(id,replacements.get(row.getKey()));
+                }
+            }
+            long total=proposed.values().stream().mapToLong(value->value.length).sum();
+            if(total>MAX_BYTES) return false;
+            preparePlayer(player,session,operation,expectedOperation,evidence);
+            items.clear(); items.putAll(proposed); bytes=total; changed();
+            for(long id:newIds) recordItemFence(operation,id);
+            return true;
+        });
     }
 
     /** Evidence and the bin edit commit together, before any player or world effect. */
